@@ -1,0 +1,12 @@
+[service]
+name = "redis"
+
+[build]
+image = "redis:7-alpine"
+
+[deploy]
+restartPolicyType = "ON_FAILURE"
+
+[deploy.resources]
+memory = "128MB"
+cpu = 0.25

@@ -1,0 +1,56 @@
+version: "3.8"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: carbon_platform
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  orchestrator:
+    build: ./orchestrator
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/carbon_platform
+      REDIS_URL: redis://redis:6379/0
+      ADMIN_AGENT_API_KEY: dev-admin-key
+    depends_on:
+      - postgres
+      - redis
+
+  adapter:
+    build: ./adapter
+    ports:
+      - "8001:8000"
+    environment:
+      AGENT_API_URL: http://host.docker.internal:8080
+      USER_ID: dev-user
+      USER_EMAIL: dev@example.com
+
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    ports:
+      - "3000:8080"
+    environment:
+      OPENAI_API_BASE_URL: http://orchestrator:8000/v1
+      OPENAI_API_KEY: sk-dev-test-key
+      WEBUI_SECRET_KEY: dev-secret
+    depends_on:
+      - orchestrator
+    volumes:
+      - openwebui:/app/backend/data
+
+volumes:
+  pgdata:
+  openwebui:

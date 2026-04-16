@@ -1,0 +1,12 @@
+[service]
+name = "postgres"
+
+[build]
+image = "postgres:16-alpine"
+
+[deploy]
+restartPolicyType = "ON_FAILURE"
+
+[deploy.resources]
+memory = "256MB"
+cpu = 0.5
