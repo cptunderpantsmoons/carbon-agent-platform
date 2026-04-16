@@ -1,4 +1,4 @@
-"""Admin API endpoints for Carbon Agent to manage the platform."""
+"""Admin API endpoints for managing users."""
 import hmac
 import uuid
 import secrets
@@ -7,16 +7,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 
 from app.database import get_session
-from app.models import User, Session, AuditLog, UserStatus, SessionStatus
+from app.models import User, AuditLog, UserStatus
 from app.schemas import (
     UserCreate, UserResponse, UserUpdate,
-    SessionResponse, SessionAction,
     AdminCommand, AdminResponse,
     PlatformHealth,
 )
-from app.session_manager import SessionManager
 from app.config import get_settings
-from datetime import datetime, timezone
 
 import structlog
 
@@ -38,30 +35,13 @@ async def platform_health(
 ):
     """Get platform-wide health metrics."""
     total_users = await db.scalar(select(func.count(User.id)))
-    active = await db.scalar(
-        select(func.count(Session.id)).where(Session.status == SessionStatus.ACTIVE)
-    )
-    idle = await db.scalar(
-        select(func.count(Session.id)).where(Session.status == SessionStatus.IDLE)
-    )
-    stopped = await db.scalar(
-        select(func.count(Session.id)).where(Session.status == SessionStatus.STOPPED)
-    )
-    errors = await db.scalar(
-        select(func.count(Session.id)).where(Session.status == SessionStatus.ERROR)
-    )
-    volumes = await db.scalar(
+    total_volumes = await db.scalar(
         select(func.count(User.volume_id)).where(User.volume_id.isnot(None))
     )
 
     return PlatformHealth(
         total_users=total_users or 0,
-        active_sessions=active or 0,
-        idle_sessions=idle or 0,
-        stopped_sessions=stopped or 0,
-        error_sessions=errors or 0,
-        total_volumes=volumes or 0,
-        estimated_cost_monthly=(active or 0) * 10 + (volumes or 0) * 0.5 + 15,
+        total_volumes=total_volumes or 0,
     )
 
 
@@ -71,7 +51,7 @@ async def create_user(
     db: AsyncSession = Depends(get_session),
     _: str = Depends(verify_admin_key),
 ):
-    """Create a new user (called by Carbon Agent admin)."""
+    """Create a new user."""
     user = User(
         id=str(uuid.uuid4()),
         email=data.email,
@@ -128,7 +108,7 @@ async def update_user(
     db: AsyncSession = Depends(get_session),
     _: str = Depends(verify_admin_key),
 ):
-    """Update a user (status, config, display name)."""
+    """Update a user."""
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
     if not user:
@@ -160,7 +140,7 @@ async def delete_user(
     db: AsyncSession = Depends(get_session),
     _: str = Depends(verify_admin_key),
 ):
-    """Delete a user and all associated resources."""
+    """Delete a user."""
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
     if not user:
@@ -181,89 +161,12 @@ async def delete_user(
     return {"status": "deleted", "user_id": user_id}
 
 
-@admin_router.post("/users/{user_id}/session", response_model=SessionResponse)
-async def manage_session(
-    user_id: str,
-    action: SessionAction,
-    db: AsyncSession = Depends(get_session),
-    _: str = Depends(verify_admin_key),
-):
-    """Start, stop, or restart a user's agent session."""
-    result = await db.execute(select(User).where(User.id == user_id))
-    user = result.scalar_one_or_none()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-
-    session_manager = SessionManager(None, get_settings())
-
-    if action.action == "start":
-        spin_result = await session_manager.spin_up(user)
-        user.railway_service_id = spin_result["service_id"]
-        session = Session(
-            id=str(uuid.uuid4()),
-            user_id=user_id,
-            status=SessionStatus.ACTIVE,
-            railway_deployment_id=spin_result.get("deployment_id"),
-            started_at=datetime.now(timezone.utc),
-        )
-        db.add(session)
-
-    elif action.action == "stop":
-        session_result = await db.execute(
-            select(Session)
-            .where(Session.user_id == user_id)
-            .where(Session.status == SessionStatus.ACTIVE)
-        )
-        session = session_result.scalar_one_or_none()
-        if not session:
-            raise HTTPException(status_code=404, detail="No active session found")
-        await session_manager.spin_down(user.railway_service_id)
-        session.status = SessionStatus.STOPPED
-        session.stopped_at = datetime.now(timezone.utc)
-
-    elif action.action == "restart":
-        session_result = await db.execute(
-            select(Session)
-            .where(Session.user_id == user_id)
-            .where(Session.status == SessionStatus.ACTIVE)
-        )
-        existing_session = session_result.scalar_one_or_none()
-        if existing_session:
-            await session_manager.spin_down(user.railway_service_id)
-            existing_session.status = SessionStatus.STOPPED
-            existing_session.stopped_at = datetime.now(timezone.utc)
-        spin_result = await session_manager.spin_up(user)
-        user.railway_service_id = spin_result["service_id"]
-        session = Session(
-            id=str(uuid.uuid4()),
-            user_id=user_id,
-            status=SessionStatus.ACTIVE,
-            railway_deployment_id=spin_result.get("deployment_id"),
-            started_at=datetime.now(timezone.utc),
-        )
-        db.add(session)
-
-    else:
-        raise HTTPException(status_code=400, detail="Unknown action")
-
-    log = AuditLog(
-        id=str(uuid.uuid4()),
-        user_id=user_id,
-        action=f"session.{action.action}",
-        performed_by="admin_agent",
-    )
-    db.add(log)
-    await db.commit()
-    await db.refresh(session)
-    return session
-
-
 @admin_router.post("/command", response_model=AdminResponse)
 async def admin_command(
     command: AdminCommand,
     _: str = Depends(verify_admin_key),
 ):
-    """Natural language command interface for Carbon Agent admin."""
+    """Natural language command interface."""
     return AdminResponse(
         status="received",
         message=f"Command '{command.command}' acknowledged. Use specific endpoints for execution.",

@@ -1,7 +1,7 @@
 """Tests for SSE streaming formatter."""
 import asyncio
 import json
-from app.streaming import create_chunk, stream_response
+from app.streaming import create_chunk, fake_stream_response
 
 
 def test_create_chunk_with_content():
@@ -24,17 +24,28 @@ def test_create_chunk_finish():
     assert data["choices"][0]["finish_reason"] == "stop"
 
 
-async def test_stream_response_yields_chunks():
-    async def content_gen():
-        yield "Hello"
-        yield " World"
-
+async def test_fake_stream_response_yields_word_chunks():
     chunks = []
-    async for chunk in stream_response(content_gen()):
+    async for chunk in fake_stream_response("Hello World Foo"):
         chunks.append(chunk)
 
-    # Should have: role chunk, 2 content chunks, finish chunk, [DONE]
-    assert len(chunks) == 5
+    # Should have: role chunk, 3 word chunks, finish chunk, [DONE]
+    assert len(chunks) == 6
     assert chunks[-1] == "data: [DONE]\n\n"
-    assert "Hello" in chunks[1]
-    assert "World" in chunks[2]
+
+    # Verify words appear in content chunks
+    content_parts = []
+    for c in chunks[1:-2]:
+        data = json.loads(c.strip().replace("data: ", ""))
+        content = data["choices"][0]["delta"].get("content")
+        if content:
+            content_parts.append(content.strip())
+
+    assert "Hello" in content_parts
+    assert "World" in content_parts
+    assert "Foo" in content_parts
+
+
+def test_fake_stream_response_sync():
+    """Run the async test synchronously."""
+    asyncio.run(test_fake_stream_response_yields_word_chunks())

@@ -1,6 +1,6 @@
 """Tests for admin endpoints."""
 from fastapi.testclient import TestClient
-from unittest.mock import patch, MagicMock, AsyncMock
+from unittest.mock import patch, MagicMock
 import pytest
 
 
@@ -26,7 +26,6 @@ def app_no_lifespan():
 def test_health_endpoint_no_lifespan():
     """Test /health endpoint without lifespan (no DB needed)."""
     from app.main import app
-    # Use a simple GET that doesn't need DB
     client = TestClient(app, raise_server_exceptions=False)
     response = client.get("/health")
     assert response.status_code == 200

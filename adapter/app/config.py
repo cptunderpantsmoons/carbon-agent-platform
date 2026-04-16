@@ -4,9 +4,13 @@ from functools import lru_cache
 
 
 class Settings(BaseSettings):
-    # Carbon Agent internal API
-    agent_api_url: str = "http://localhost:8000"
+    # Agent Zero internal API
+    agent_api_url: str = "http://localhost:5000"
     agent_api_key: str = ""
+
+    # Agent Zero context defaults
+    default_lifetime_hours: int = 24
+    default_project_name: str = ""
 
     # User context
     user_id: str = ""

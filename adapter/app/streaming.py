@@ -28,17 +28,20 @@ def create_chunk(
     return f"data: {chunk.model_dump_json()}\n\n"
 
 
-async def stream_response(content_generator: AsyncGenerator) -> AsyncGenerator[str, None]:
-    """Convert an async content generator into SSE-formatted stream."""
+async def fake_stream_response(text: str) -> AsyncGenerator[str, None]:
+    """Split complete text into word chunks and yield as SSE stream."""
     completion_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
 
     # First chunk: role
     yield create_chunk(completion_id, role="assistant")
 
-    # Content chunks
-    async for chunk_text in content_generator:
-        if chunk_text:
-            yield create_chunk(completion_id, content=chunk_text)
+    # Split text into words and yield each as a chunk
+    words = text.split()
+    for word in words:
+        # Re-add space that split() removed (except for last word)
+        idx = text.find(word)
+        suffix = " " if idx + len(word) < len(text) and text[idx + len(word)] == " " else ""
+        yield create_chunk(completion_id, content=word + suffix)
 
     # Final chunk: done
     yield create_chunk(completion_id, finish_reason="stop")

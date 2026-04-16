@@ -1,13 +1,16 @@
-"""HTTP client to communicate with the Carbon Agent internal API."""
+"""HTTP client to communicate with Agent Zero's REST API."""
 import httpx
 import structlog
 from app.config import get_settings
 
 logger = structlog.get_logger()
 
+# In-memory mapping of user_id -> context_id for multi-turn conversations
+_context_map: dict[str, str] = {}
+
 
 class AgentClient:
-    """Async client for the Carbon Agent internal API."""
+    """Async client for the Agent Zero REST API."""
 
     def __init__(self, base_url: str | None = None, api_key: str | None = None):
         settings = get_settings()
@@ -18,44 +21,43 @@ class AgentClient:
             "Content-Type": "application/json",
         }
 
-    async def send_message(self, message: str, conversation_id: str | None = None) -> str:
-        """Send a message to Carbon Agent and get the response."""
+    async def send_message(self, message: str, user_id: str | None = None) -> str:
+        """Send a message to Agent Zero and get the full response."""
+        settings = get_settings()
+        effective_user_id = user_id or settings.user_id
+        context_id = _context_map.get(effective_user_id)
+
         payload = {
             "message": message,
-            "user_id": get_settings().user_id,
-            "conversation_id": conversation_id,
+            "lifetime_hours": settings.default_lifetime_hours,
         }
+        if context_id:
+            payload["context_id"] = context_id
+        if settings.default_project_name:
+            payload["project_name"] = settings.default_project_name
 
         async with httpx.AsyncClient(timeout=300.0) as client:
             response = await client.post(
-                f"{self.base_url}/api/chat",
+                f"{self.base_url}/api_message",
                 json=payload,
                 headers=self._headers,
             )
             response.raise_for_status()
             data = response.json()
-            return data.get("response", "")
 
-    async def send_message_stream(self, message: str, conversation_id: str | None = None):
-        """Send a message and stream the response."""
-        payload = {
-            "message": message,
-            "user_id": get_settings().user_id,
-            "conversation_id": conversation_id,
-            "stream": True,
-        }
+        # Persist context_id for multi-turn
+        returned_context_id = data.get("context_id")
+        if returned_context_id and effective_user_id:
+            _context_map[effective_user_id] = returned_context_id
 
-        async with httpx.AsyncClient(timeout=300.0) as client:
-            async with client.stream(
-                "POST",
-                f"{self.base_url}/api/chat",
-                json=payload,
-                headers=self._headers,
-            ) as response:
-                response.raise_for_status()
-                async for line in response.aiter_lines():
-                    if line.startswith("data: "):
-                        chunk = line[6:]
-                        if chunk.strip() == "[DONE]":
-                            break
-                        yield chunk
+        return data.get("response", "")
+
+    @staticmethod
+    def get_context_id(user_id: str) -> str | None:
+        """Get the stored context_id for a user."""
+        return _context_map.get(user_id)
+
+    @staticmethod
+    def set_context_id(user_id: str, context_id: str) -> None:
+        """Manually set the context_id for a user."""
+        _context_map[user_id] = context_id

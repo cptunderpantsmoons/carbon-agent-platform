@@ -1,65 +1,52 @@
-# Carbon Agent Multi-User Platform
+# Carbon Agent Platform
 
-A multi-user AI workspace platform built on Carbon Agent, Railway, and Open WebUI.
+An OpenAI-compatible adapter for Agent Zero with user management.
 
 ## Architecture
 
 ```
-Open WebUI -> Orchestrator -> Per-User Agent Instances
-    ^              |
-    |        Railway API
-    |              v
-    +-- Admin Agent (Carbon Agent)
+Open WebUI -> Adapter (OpenAI translator) -> Agent Zero (/api_message)
+                                                  ^
+Orchestrator (user management / admin API) --------+
 ```
+
+- **Adapter**: Translates OpenAI chat completions API to Agent Zero's `/api_message` endpoint. Fakes SSE streaming for OpenAI-compatible clients.
+- **Orchestrator**: User management, API key provisioning, admin commands.
+- **Agent Zero**: The actual AI agent backend.
 
 ## Quick Start
 
 ```bash
 git clone <repo> && cd carbon-agent-platform
-./open-webui/setup.sh
 
-# Create users via admin API
+# Start services
+docker compose up --build
+
+# Create a user via admin API
 curl -X POST http://localhost:8000/admin/users \
   -H 'X-Admin-Key: dev-admin-key' \
   -H 'Content-Type: application/json' \
   -d '{"email": "alice@example.com", "display_name": "Alice"}'
 
-# Configure Open WebUI at http://localhost:3000 -> Settings -> Connections
-# Set API base: http://localhost:8000/v1
-# Set API key: (from the user creation response)
+# Configure Open WebUI at http://localhost:3000
+# Settings -> Connections -> OpenAI API
+# Base URL: http://localhost:8001/v1
+# API Key: (from user creation response)
 ```
 
-## Railway Deployment
+## Agent Zero API
 
-```bash
-npm install -g @railway/cli
-railway login
-railway link
-railway up
-railway variables set ADMIN_AGENT_API_KEY=your-key
-railway variables set RAILWAY_API_TOKEN=your-token
-```
-
-## Carbon Agent Admin
-
-Scheduled tasks keep the admin agent in the loop:
-- Health checks every 5 min
-- Idle cleanup every 5 min
-- Daily reports at 9 AM
-- Weekly volume audit Mondays at 2 AM
-
-## Cost Estimation
-
-| Scenario | Monthly Cost |
-|---|---|
-| 15 users, 5 concurrent | ~$65 |
-| 15 users, all idle | ~$20 |
-| 50 users, 10 concurrent | ~$130 |
+The adapter calls Agent Zero's REST endpoint:
+- **POST** `/api_message`
+- Body: `{"message": "...", "context_id": "...", "lifetime_hours": 24}`
+- Response: `{"context_id": "uuid", "response": "..."}`
+- No REST streaming; context_id persisted for multi-turn conversations
 
 ## Development
 
 ```bash
-make dev         # Start local stack
 make test        # Run all tests
-make build       # Build Docker images
+make test-adapter   # Adapter tests only
+make test-orchestrator  # Orchestrator tests only
+make dev         # Start local stack
 ```

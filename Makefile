@@ -1,4 +1,4 @@
-.PHONY: dev test build deploy clean
+.PHONY: dev test build clean
 
 # Local development
 dev:
@@ -16,24 +16,20 @@ docker compose logs -f
 # Testing
 test-adapter:
 cd adapter && pytest tests/ -v
+
 test-orchestrator:
 cd orchestrator && pytest tests/ -v
+
 test: test-adapter test-orchestrator
 
 # Build
 build-adapter:
 docker build -t carbon-agent-adapter:latest ./adapter
-build-orchestrator:
-docker build -t carbon-agent-orchestrator:latest ./orchestrator
-build: build-adapter build-orchestrator
 
-# Railway
-deploy-staging:
-railway up --environment staging
-deploy-production:
-railway up --environment production
+build: build-adapter
 
 # Cleanup
 clean:
 docker compose down -v
 rm -f test.db
+rm -f orchestrator/test.db

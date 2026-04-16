@@ -1,5 +1,5 @@
-"""OpenAI-compatible API adapter for Carbon Agent."""
-from fastapi import FastAPI, Request, HTTPException
+"""OpenAI-compatible API adapter for Agent Zero."""
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse, JSONResponse
 import structlog
 
@@ -10,11 +10,11 @@ from app.schemas import (
     ChatMessage,
 )
 from app.agent_client import AgentClient
-from app.streaming import stream_response
+from app.streaming import fake_stream_response
 from app.config import get_settings
 
 logger = structlog.get_logger()
-app = FastAPI(title="Carbon Agent OpenAI Adapter", version="1.0.0")
+app = FastAPI(title="Carbon Agent OpenAI Adapter", version="2.0.0")
 
 
 @app.get("/health")
@@ -39,7 +39,11 @@ async def list_models():
 
 @app.post("/v1/chat/completions")
 async def chat_completions(request: ChatCompletionRequest):
-    """OpenAI-compatible chat completions endpoint."""
+    """OpenAI-compatible chat completions endpoint.
+
+    Always calls Agent Zero (non-streaming), then fakes SSE stream
+    if the client requested streaming.
+    """
     settings = get_settings()
     client = AgentClient()
 
@@ -55,10 +59,17 @@ async def chat_completions(request: ChatCompletionRequest):
 
     logger.info("chat_request", user_id=settings.user_id, stream=request.stream)
 
+    # Always call agent non-streaming
+    try:
+        response_text = await client.send_message(user_message)
+    except Exception as e:
+        logger.error("agent_error", error=str(e))
+        raise HTTPException(status_code=502, detail=f"Agent error: {str(e)}")
+
     if request.stream:
-        content_gen = client.send_message_stream(user_message)
+        # Fake-stream the complete response as SSE word chunks
         return StreamingResponse(
-            stream_response(content_gen),
+            fake_stream_response(response_text),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
@@ -68,47 +79,6 @@ async def chat_completions(request: ChatCompletionRequest):
         )
 
     # Non-streaming response
-    try:
-        response_text = await client.send_message(user_message)
-    except Exception as e:
-        logger.error("agent_error", error=str(e))
-        raise HTTPException(status_code=502, detail=f"Agent error: {str(e)}")
-
-    return ChatCompletionResponse(
-        model=settings.model_name,
-        choices=[
-            ChatCompletionChoice(
-                message=ChatMessage(role="assistant", content=response_text)
-            )
-        ],
-    )
-
-
-@app.post("/v1/chat/completions/{conversation_id}")
-async def chat_completions_with_conversation(
-    conversation_id: str, request: ChatCompletionRequest
-):
-    """Chat completions with conversation context."""
-    settings = get_settings()
-    client = AgentClient()
-
-    user_message = ""
-    for msg in reversed(request.messages):
-        if msg.role == "user":
-            user_message = msg.content
-            break
-
-    if not user_message:
-        raise HTTPException(status_code=400, detail="No user message found")
-
-    if request.stream:
-        content_gen = client.send_message_stream(user_message, conversation_id)
-        return StreamingResponse(
-            stream_response(content_gen),
-            media_type="text/event-stream",
-        )
-
-    response_text = await client.send_message(user_message, conversation_id)
     return ChatCompletionResponse(
         model=settings.model_name,
         choices=[
