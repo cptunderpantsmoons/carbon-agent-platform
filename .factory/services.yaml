@@ -4,7 +4,7 @@ commands:
   test_orchestrator: python -m pytest orchestrator/tests/ -v
   test_adapter: python -m pytest adapter/tests/ -v
   test_integration: python -m pytest tests/integration/ -v
-  test: python -m pytest orchestrator/tests/ adapter/tests/ -v
+  test: python -m pytest orchestrator/tests/ -v && python -m pytest adapter/tests/ -v
   lint: python -m pyflakes orchestrator/app adapter/app || true
   build_all: docker compose build
   compose_up: docker compose up -d
