@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     agent_docker_image: str = "carbon-agent-adapter:latest"
     agent_default_memory: str = "1GB"
     agent_default_cpu: int = 1
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
 @lru_cache

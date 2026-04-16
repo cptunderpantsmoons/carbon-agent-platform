@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     # LLM info for OpenAI-compatible metadata
     model_name: str = "carbon-agent"
 
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+    model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "protected_namespaces": ("settings_",)}
 
 
 @lru_cache

@@ -6,7 +6,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from app.models import User, Session, SessionStatus
+from app.models import User, Session, SessionStatus, UserStatus
 from app.session_manager import SessionManager
 
 logger = structlog.get_logger()
@@ -24,7 +24,7 @@ class AgentRouter:
         user = result.scalar_one_or_none()
         if not user:
             raise HTTPException(status_code=401, detail="Invalid API key")
-        if user.status != "active":
+        if user.status != UserStatus.ACTIVE:
             raise HTTPException(status_code=403, detail="User account is not active")
         return user
 
@@ -60,6 +60,7 @@ class AgentRouter:
             session.railway_deployment_id = spin_result["deployment_id"]
             session.status = SessionStatus.ACTIVE
             session.internal_url = f"http://{spin_result['service_id']}.railway.internal:8000"
+            user.railway_service_id = spin_result["service_id"]
             await db.commit()
         except Exception as e:
             session.status = SessionStatus.ERROR
@@ -81,14 +82,8 @@ class AgentRouter:
         headers.pop("authorization", None)  # Strip user auth, use internal
 
         async with httpx.AsyncClient(timeout=300.0) as client:
-            response = await client.post(
-                target_url,
-                content=body,
-                headers={"Content-Type": "application/json"},
-            )
-
-        return StreamingResponse(
-            content=iter([response.content]),
-            status_code=response.status_code,
-            media_type=response.headers.get("content-type", "application/json"),
-        )
+            async with client.stream('POST', target_url, content=body, headers={'Content-Type': 'application/json'}) as response:
+                async def stream_generator():
+                    async for chunk in response.aiter_bytes():
+                        yield chunk
+                return StreamingResponse(stream_generator(), status_code=response.status_code, media_type=response.headers.get('content-type', 'application/json'))

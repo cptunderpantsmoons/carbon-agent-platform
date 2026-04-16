@@ -1,4 +1,5 @@
 """Admin API endpoints for Carbon Agent to manage the platform."""
+import hmac
 import uuid
 import secrets
 from fastapi import APIRouter, Depends, HTTPException, Header
@@ -11,7 +12,7 @@ from app.schemas import (
     UserCreate, UserResponse, UserUpdate,
     SessionResponse, SessionAction,
     AdminCommand, AdminResponse,
-    PlatformHealth, ServiceHealth,
+    PlatformHealth,
 )
 from app.session_manager import SessionManager
 from app.config import get_settings
@@ -25,7 +26,7 @@ admin_router = APIRouter(prefix="/admin", tags=["admin"])
 
 async def verify_admin_key(x_admin_key: str = Header(...)) -> str:
     settings = get_settings()
-    if x_admin_key != settings.admin_agent_api_key:
+    if not hmac.compare_digest(x_admin_key, settings.admin_agent_api_key):
         raise HTTPException(status_code=403, detail="Invalid admin key")
     return x_admin_key
 
@@ -165,8 +166,6 @@ async def delete_user(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    await db.delete(user)
-
     log = AuditLog(
         id=str(uuid.uuid4()),
         user_id=user_id,
@@ -175,6 +174,9 @@ async def delete_user(
         performed_by="admin_agent",
     )
     db.add(log)
+    await db.flush()
+
+    await db.delete(user)
     await db.commit()
     return {"status": "deleted", "user_id": user_id}
 
@@ -196,6 +198,7 @@ async def manage_session(
 
     if action.action == "start":
         spin_result = await session_manager.spin_up(user)
+        user.railway_service_id = spin_result["service_id"]
         session = Session(
             id=str(uuid.uuid4()),
             user_id=user_id,
@@ -206,16 +209,40 @@ async def manage_session(
         db.add(session)
 
     elif action.action == "stop":
-        result = await db.execute(
+        session_result = await db.execute(
             select(Session)
             .where(Session.user_id == user_id)
             .where(Session.status == SessionStatus.ACTIVE)
         )
-        session = result.scalar_one_or_none()
-        if session:
+        session = session_result.scalar_one_or_none()
+        if not session:
+            raise HTTPException(status_code=404, detail="No active session found")
+        await session_manager.spin_down(user.railway_service_id)
+        session.status = SessionStatus.STOPPED
+        session.stopped_at = datetime.now(timezone.utc)
+
+    elif action.action == "restart":
+        session_result = await db.execute(
+            select(Session)
+            .where(Session.user_id == user_id)
+            .where(Session.status == SessionStatus.ACTIVE)
+        )
+        existing_session = session_result.scalar_one_or_none()
+        if existing_session:
             await session_manager.spin_down(user.railway_service_id)
-            session.status = SessionStatus.STOPPED
-            session.stopped_at = datetime.now(timezone.utc)
+            existing_session.status = SessionStatus.STOPPED
+            existing_session.stopped_at = datetime.now(timezone.utc)
+        spin_result = await session_manager.spin_up(user)
+        user.railway_service_id = spin_result["service_id"]
+        session = Session(
+            id=str(uuid.uuid4()),
+            user_id=user_id,
+            status=SessionStatus.ACTIVE,
+            railway_deployment_id=spin_result.get("deployment_id"),
+            started_at=datetime.now(timezone.utc),
+        )
+        db.add(session)
+
     else:
         raise HTTPException(status_code=400, detail="Unknown action")
 

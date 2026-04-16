@@ -1,5 +1,5 @@
 """Manages agent session lifecycle: spin up, spin down, idle detection."""
-import uuid
+import json
 from datetime import datetime, timezone, timedelta
 from typing import Any
 
@@ -46,7 +46,7 @@ class SessionManager:
         env_vars = {
             "USER_ID": user.id,
             "USER_EMAIL": user.email,
-            "USER_CONFIG": str(user.config or {}),
+            "USER_CONFIG": json.dumps(user.config or {}, default=str),
             "VOLUME_MOUNT_PATH": self.settings.volume_mount_path,
         }
 
