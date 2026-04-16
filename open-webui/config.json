@@ -1,0 +1,21 @@
+{
+  "openai": {
+    "api_base_url": "http://orchestrator:8000/v1",
+    "api_key": "{{USER_API_KEY}}",
+    "model_name": "carbon-agent"
+  },
+  "ui": {
+    "title": "Carbon Agent",
+    "description": "Your personal AI workspace",
+    "logo": "/static/logo.png"
+  },
+  "features": {
+    "signup_enabled": true,
+    "default_user_role": "user",
+    "admin_only": false
+  },
+  "auth": {
+    "type": "database",
+    "admin_email": "admin@example.com"
+  }
+}
