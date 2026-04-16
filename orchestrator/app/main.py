@@ -5,6 +5,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.database import get_session, init_db, create_tables
 from app.admin import admin_router
+from app.users import user_router
+from app.session_manager import get_session_manager
 import structlog
 
 logger = structlog.get_logger()
@@ -15,8 +17,16 @@ async def lifespan(app: FastAPI):
     """Startup/shutdown lifecycle."""
     init_db()
     await create_tables()
+    
+    # Start session manager cleanup task
+    session_manager = get_session_manager()
+    await session_manager.start_cleanup_task()
+    
     logger.info("orchestrator_started")
     yield
+    
+    # Stop session manager cleanup task
+    await session_manager.stop_cleanup_task()
     logger.info("orchestrator_stopped")
 
 
@@ -34,8 +44,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Mount admin routes
+# Mount admin and user routes
 app.include_router(admin_router)
+app.include_router(user_router)
 
 
 @app.get("/health")

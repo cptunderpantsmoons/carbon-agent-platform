@@ -1,0 +1,201 @@
+"""User-facing API endpoints for account and session management."""
+import hmac
+import uuid
+import secrets
+from fastapi import APIRouter, Depends, HTTPException, Header
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+
+from app.database import get_session
+from app.models import User, AuditLog, UserStatus
+from app.schemas import UserResponse, UserUpdate
+from app.session_manager import get_session_manager, SessionManager
+from app.config import get_settings
+from typing import Optional
+
+import structlog
+
+logger = structlog.get_logger()
+user_router = APIRouter(prefix="/user", tags=["user"])
+
+
+async def verify_user_api_key(
+    authorization: str = Header(...),
+    db: AsyncSession = Depends(get_session),
+) -> User:
+    """Verify user API key and return authenticated user.
+
+    Args:
+        authorization: Authorization header (Bearer token)
+        db: Database session
+
+    Returns:
+        Authenticated user
+
+    Raises:
+        HTTPException: If authentication fails
+    """
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Missing Authorization header")
+
+    if not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Invalid Authorization header format")
+
+    api_key = authorization[7:]  # Remove "Bearer " prefix
+
+    result = await db.execute(select(User).where(User.api_key == api_key))
+    user = result.scalar_one_or_none()
+
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid API key")
+
+    if user.status != UserStatus.ACTIVE:
+        raise HTTPException(status_code=403, detail="User account is not active")
+
+    return user
+
+
+@user_router.get("/me", response_model=UserResponse)
+async def get_my_profile(
+    user: User = Depends(verify_user_api_key),
+):
+    """Get current authenticated user's profile."""
+    return user
+
+
+@user_router.patch("/me", response_model=UserResponse)
+async def update_my_profile(
+    data: UserUpdate,
+    user: User = Depends(verify_user_api_key),
+    db: AsyncSession = Depends(get_session),
+):
+    """Update current user's profile."""
+    # Only allow certain fields to be updated by users
+    if data.display_name is not None:
+        user.display_name = data.display_name
+    if data.config is not None:
+        user.config = data.config
+
+    log = AuditLog(
+        id=str(uuid.uuid4()),
+        user_id=user.id,
+        action="user.updated",
+        details={"field": "profile_update"},
+        performed_by=user.email,
+    )
+    db.add(log)
+    await db.commit()
+    await db.refresh(user)
+    return user
+
+
+@user_router.get("/me/session")
+async def get_my_session_info(
+    user: User = Depends(verify_user_api_key),
+):
+    """Get current user's session information."""
+    session_manager = get_session_manager()
+    session_info = await session_manager.get_session_info(user.id)
+
+    if not session_info:
+        return {"active": False}
+
+    return {
+        "active": True,
+        "last_activity": session_info["last_activity"],
+        "idle_seconds": session_info["idle_seconds"],
+        "timeout_seconds": session_info["timeout_seconds"],
+    }
+
+
+@user_router.post("/me/session/refresh")
+async def refresh_session(
+    user: User = Depends(verify_user_api_key),
+    db: AsyncSession = Depends(get_session),
+):
+    """Refresh user session to prevent timeout."""
+    session_manager = get_session_manager()
+    await session_manager.record_activity(user.id)
+
+    return {"status": "refreshed"}
+
+
+@user_router.post("/me/service/ensure")
+async def ensure_my_service(
+    user: User = Depends(verify_user_api_key),
+    db: AsyncSession = Depends(get_session),
+):
+    """Ensure user has an active Railway service (spin up if needed)."""
+    session_manager = get_session_manager()
+    was_created, _ = await session_manager.ensure_user_service(db, user.id)
+    await db.commit()
+
+    if was_created:
+        return {"status": "created", "message": "Service spun up successfully"}
+    return {"status": "existing", "message": "Service already active"}
+
+
+@user_router.post("/me/service/spin-down")
+async def spin_down_my_service(
+    user: User = Depends(verify_user_api_key),
+    db: AsyncSession = Depends(get_session),
+):
+    """Spin down user's Railway service."""
+    session_manager = get_session_manager()
+    result = await session_manager.spin_down_user_service(db, user.id)
+    await db.commit()
+
+    if result:
+        return {"status": "spun_down", "message": "Service spun down successfully"}
+    return {"status": "not_found", "message": "No active service to spin down"}
+
+
+@user_router.get("/me/service/status")
+async def get_my_service_status(
+    user: User = Depends(verify_user_api_key),
+    db: AsyncSession = Depends(get_session),
+):
+    """Get current user's Railway service status."""
+    session_manager = get_session_manager()
+    status = await session_manager.get_service_status(db, user.id)
+
+    if not status:
+        return {"active": False}
+
+    return {
+        "active": True,
+        "service_id": status["service_id"],
+        "volume_id": status["volume_id"],
+        "status": status.get("status"),
+        "updated_at": status.get("updated_at"),
+        "instances": status.get("instances", []),
+    }
+
+
+@user_router.post("/me/api-key/rotate")
+async def rotate_my_api_key(
+    user: User = Depends(verify_user_api_key),
+    db: AsyncSession = Depends(get_session),
+):
+    """Rotate user's API key."""
+    old_key = user.api_key
+    new_key = f"sk-{secrets.token_hex(24)}"
+
+    user.api_key = new_key
+
+    log = AuditLog(
+        id=str(uuid.uuid4()),
+        user_id=user.id,
+        action="user.api_key_rotated",
+        details={"old_key_last_4": old_key[-4:] if old_key else None},
+        performed_by=user.email,
+    )
+    db.add(log)
+    await db.commit()
+    await db.refresh(user)
+
+    return {
+        "status": "rotated",
+        "new_api_key": new_key,
+        "message": "API key rotated successfully",
+    }
