@@ -56,3 +56,19 @@
     - .env.example - Configuration template
     - orchestrator/pytest.ini - pytest-asyncio configuration
     - .gitignore - Python build artifacts exclusion
+## Done
+
+- [x] **Task 5: Orchestrator API (Admin & User Endpoints)**
+  - **Status:** ✅ DONE (8 user-facing endpoints created)
+  - **Completion Date:** 2026-04-16
+  - **Files Created:**
+    - orchestrator/app/users.py - User-facing API endpoints
+    - orchestrator/tests/test_users.py - User API tests
+  - **Endpoints:**
+    - GET /user/me - User profile
+    - PATCH /user/me - Update profile
+    - GET /user/me/session - Session info
+    - POST /user/me/session/refresh - Refresh session
+    - POST /user/me/service/ensure - Ensure service
+    - POST /user/me/service/spin-down - Spin down service
+    - GET /user/me/service/status - Service status
