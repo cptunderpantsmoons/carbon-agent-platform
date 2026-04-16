@@ -12,10 +12,8 @@ class Settings(BaseSettings):
     default_lifetime_hours: int = 24
     default_project_name: str = ""
 
-    # User context
-    user_id: str = ""
-    user_email: str = ""
-    user_config: str = "{}"
+    # Database (shared with orchestrator, SQLite for testing)
+    database_url: str = "sqlite+aiosqlite:///./test.db"
 
     # Server
     port: int = 8000
@@ -25,7 +23,6 @@ class Settings(BaseSettings):
     model_name: str = "carbon-agent"
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "protected_namespaces": ("settings_",)}
-
 
 @lru_cache
 def get_settings() -> Settings:
