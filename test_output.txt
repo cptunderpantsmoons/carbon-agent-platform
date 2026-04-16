@@ -1,0 +1,35 @@
+============================= test session starts =============================
+platform win32 -- Python 3.14.3, pytest-8.4.2, pluggy-1.6.0 -- C:\Users\MoonBuggy\AppData\Local\Python\pythoncore-3.14-64\python.exe
+cachedir: .pytest_cache
+rootdir: C:\Users\MoonBuggy\Documents\carbon agent v2 rail\carbon-agent-platform\orchestrator
+configfile: pytest.ini
+plugins: anyio-4.13.0, asyncio-0.24.0
+asyncio: mode=Mode.STRICT, default_loop_scope=function
+collecting ... collected 32 items
+
+orchestrator\tests\test_scheduler.py::test_scheduler_start_creates_tasks PASSED [  3%]
+orchestrator\tests\test_scheduler.py::test_scheduler_stop_cancels_tasks PASSED [  6%]
+orchestrator\tests\test_scheduler.py::test_scheduler_start_idempotent PASSED [  9%]
+orchestrator\tests\test_scheduler.py::test_scheduler_stop_when_not_running PASSED [ 12%]
+orchestrator\tests\test_scheduler.py::test_get_scheduler_singleton PASSED [ 15%]
+orchestrator\tests\test_scheduler.py::test_check_service_health_healthy_services PASSED [ 18%]
+orchestrator\tests\test_scheduler.py::test_check_service_health_unhealthy_services PASSED [ 21%]
+orchestrator\tests\test_scheduler.py::test_check_service_health_unreachable_services PASSED [ 25%]
+orchestrator\tests\test_scheduler.py::test_check_service_health_no_services PASSED [ 28%]
+orchestrator\tests\test_scheduler.py::test_check_service_health_error_handling PASSED [ 31%]
+orchestrator\tests\test_scheduler.py::test_health_monitor_loop_runs_periodically PASSED [ 34%]
+orchestrator\tests\test_scheduler.py::test_health_monitor_loop_error_recovery PASSED [ 37%]
+orchestrator\tests\test_scheduler.py::test_aggregate_usage_analytics PASSED [ 40%]
+orchestrator\tests\test_scheduler.py::test_aggregate_usage_analytics_error_handling PASSED [ 43%]
+orchestrator\tests\test_scheduler.py::test_analytics_loop_runs_periodically PASSED [ 46%]
+orchestrator\tests\test_scheduler.py::test_cleanup_old_audit_logs PASSED [ 50%]
+orchestrator\tests\test_scheduler.py::test_cleanup_preserves_critical_logs PASSED [ 53%]
+orchestrator\tests\test_scheduler.py::test_cleanup_old_audit_logs_error_handling PASSED [ 56%]
+orchestrator\tests\test_scheduler.py::test_audit_cleanup_loop_runs_periodically PASSED [ 59%]
+orchestrator\tests\test_scheduler.py::test_check_database_health_healthy PASSED [ 62%]
+orchestrator\tests\test_scheduler.py::test_check_database_health_connection_failure PASSED [ 65%]
+orchestrator\tests\test_scheduler.py::test_check_database_health_orphaned_users PASSED [ 68%]
+orchestrator\tests\test_scheduler.py::test_check_database_health_size_check_failure PASSED [ 71%]
+orchestrator\tests\test_scheduler.py::test_check_database_health_error_handling PASSED [ 75%]
+orchestrator\tests\test_scheduler.py::test_db_health_check_loop_runs_periodically PASSED [ 78%]
+orchestrator\tests\test_scheduler.py::test_one_task_failure_does_not_stop_others 

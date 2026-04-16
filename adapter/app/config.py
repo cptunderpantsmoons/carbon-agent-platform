@@ -8,9 +8,13 @@ class Settings(BaseSettings):
     agent_api_url: str = "http://localhost:5000"
     agent_api_key: str = ""
 
+    # Per-user Railway service routing
+    railway_service_url_template: str = ""  # e.g. "https://{service_id}.up.railway.app"
+
     # Agent Zero context defaults
     default_lifetime_hours: int = 24
     default_project_name: str = ""
+    user_id: str = ""  # Default user ID for standalone mode
 
     # Database (shared with orchestrator, SQLite for testing)
     database_url: str = "sqlite+aiosqlite:///./test.db"

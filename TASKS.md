@@ -30,7 +30,7 @@
 - [ ] **Task 5: Orchestrator API (Admin & User Endpoints)**
 - [ ] **Task 6: Docker & Railway Deployment Configs**
 - [ ] **Task 7: Admin Agent Scheduler Tasks**
-- [ ] **Task 8: Open WebUI Integration Config**
+- [x] **Task 8: Open WebUI Integration Config**
 - [ ] **Task 9: Register Admin Scheduler Tasks**
 - [ ] **Task 10: Integration Test Suite**
 
@@ -91,3 +91,21 @@
     - Health checks for all services
     - Resource limits for production stability
     - One-command deployment with Railway CLI
+
+- [x] **Task 8: Open WebUI Integration Config**
+  - **Status:** ✅ DONE (35 config tests + 7 auth route tests passing)
+  - **Completion Date:** 2026-04-16
+  - **Files Created:**
+    - open-webui/config.json - Full white-label config with Clerk integration
+    - open-webui/clerk-integration.js - Clerk session/API key injection for frontend
+    - open-webui/Dockerfile - Custom Open WebUI image with theme CSS and Clerk
+    - open-webui/tests/test_config.py - 35 config validation tests
+    - orchestrator/app/auth_routes.py - /api/v1/auth/get-api-key endpoint
+    - orchestrator/tests/test_auth_routes.py - 7 auth route tests
+  - **Features:**
+    - White-label branding ("The Intelligence Hub" / "Carbon Agent")
+    - Custom CSS theme (dark mode with accent colors)
+    - Clerk authentication integration with auto API key injection
+    - Pre-configured OpenAI API connection pointing to adapter
+    - GET /api/v1/auth/get-api-key - Clerk token to API key retrieval
+    - GET /api/v1/auth/clerk-status - Clerk config status check

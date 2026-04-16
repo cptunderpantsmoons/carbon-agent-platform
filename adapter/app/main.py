@@ -20,6 +20,21 @@ logger = structlog.get_logger()
 app = FastAPI(title="Carbon Agent OpenAI Adapter", version="2.0.0")
 
 
+def _get_agent_base_url(user: User, settings) -> str:
+    """Determine the Agent Zero base URL for a specific user.
+
+    If the user has an active Railway service, route to their dedicated instance.
+    Otherwise, fall back to the shared Agent Zero endpoint.
+    """
+    if user.railway_service_id:
+        # Construct the Railway service URL for per-user routing
+        # Format: https://{service_id}.railway.app or internal network URL
+        railway_service_url = getattr(settings, 'railway_service_url_template', '')
+        if railway_service_url:
+            return railway_service_url.format(service_id=user.railway_service_id)
+    return settings.agent_api_url
+
+
 @app.get("/health")
 async def health():
     return {"status": "healthy", "service": "carbon-agent-adapter"}
@@ -66,11 +81,10 @@ async def chat_completions(
 
     logger.info("chat_request", user_id=user.id, user_email=user.email, stream=request.stream)
 
-    # Create agent client with user-specific configuration
-    # Note: In a real deployment, this would route to the user's Railway service URL
-    # For now, we use the shared Agent Zero endpoint
+    # Route to user's dedicated Railway service or fallback to shared endpoint
+    base_url = _get_agent_base_url(user, settings)
     client = AgentClient(
-        base_url=settings.agent_api_url,
+        base_url=base_url,
         api_key=user.api_key,
     )
 

@@ -1,16 +1,15 @@
 """User-facing API endpoints for account and session management."""
-import hmac
 import uuid
 import secrets
-from fastapi import APIRouter, Depends, HTTPException, Header
+from fastapi import APIRouter, Depends, HTTPException, Header, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.database import get_session
 from app.models import User, AuditLog, UserStatus
 from app.schemas import UserResponse, UserUpdate
-from app.session_manager import get_session_manager, SessionManager
-from app.config import get_settings
+from app.session_manager import get_session_manager
+from app.api_key_injection import invalidate_api_key_cache
 from typing import Optional
 
 import structlog
@@ -20,7 +19,7 @@ user_router = APIRouter(prefix="/user", tags=["user"])
 
 
 async def verify_user_api_key(
-    authorization: str = Header(...),
+    authorization: Optional[str] = Header(default=None),
     db: AsyncSession = Depends(get_session),
 ) -> User:
     """Verify user API key and return authenticated user.
@@ -57,6 +56,7 @@ async def verify_user_api_key(
 
 @user_router.get("/me", response_model=UserResponse)
 async def get_my_profile(
+    request: Request,
     user: User = Depends(verify_user_api_key),
 ):
     """Get current authenticated user's profile."""
@@ -182,6 +182,8 @@ async def rotate_my_api_key(
     new_key = f"sk-{secrets.token_hex(24)}"
 
     user.api_key = new_key
+    if user.clerk_user_id:
+        invalidate_api_key_cache(user.clerk_user_id)
 
     log = AuditLog(
         id=str(uuid.uuid4()),

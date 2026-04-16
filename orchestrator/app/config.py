@@ -33,6 +33,26 @@ class Settings(BaseSettings):
     agent_default_memory: str = "1GB"
     agent_default_cpu: int = 1
 
+    # Clerk Authentication
+    clerk_secret_key: str = ""
+    clerk_publishable_key: str = ""
+    clerk_webhook_secret: str = ""
+    clerk_jwt_public_key: str = ""  # Optional, can be fetched from API
+    clerk_authorized_origins: str = ""  # Comma-separated list of authorized origins
+
+    # CORS
+    cors_allowed_origins: str = ""  # Comma-separated list of allowed origins
+
+    # Scheduler
+    health_check_interval_minutes: int = 5
+    analytics_interval_minutes: int = 60
+    audit_cleanup_interval_hours: int = 24
+    audit_retention_days: int = 90
+    db_health_check_interval_minutes: int = 10
+
+    # Deployment
+    auto_create_tables: bool = True  # Set false in production to use Alembic migrations instead
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
 @lru_cache

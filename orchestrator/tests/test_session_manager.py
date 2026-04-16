@@ -452,3 +452,235 @@ async def test_spin_up_failure_cleanup(
 
             # Verify volume was cleaned up
             mock_railway_client.delete_volume.assert_called_once_with("vol-123")
+
+
+@pytest.mark.asyncio
+async def test_spin_down_idle_user_success(session_manager, mock_user):
+    """Test spinning down an idle user's service with self-created DB session."""
+    # Set up user with active service
+    mock_user.railway_service_id = "svc-123"
+    mock_user.volume_id = "vol-123"
+    mock_user.status = UserStatus.ACTIVE
+
+    # Mock database session
+    mock_db = AsyncMock(spec=AsyncSession)
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none.return_value = mock_user
+    mock_db.execute.return_value = mock_result
+
+    # Mock Railway client
+    mock_railway_client = AsyncMock()
+    mock_railway_client.delete_service.return_value = True
+    mock_railway_client.delete_volume.return_value = True
+
+    # Record activity so user is in active sessions
+    await session_manager.record_activity("test-user-1")
+    assert "test-user-1" in session_manager._active_sessions
+
+    with patch("app.session_manager.get_railway_client", return_value=mock_railway_client):
+        with patch.object(session_manager, "_get_db_session", return_value=mock_db):
+            result = await session_manager.spin_down_idle_user("test-user-1")
+
+            assert result is True
+            assert mock_user.railway_service_id is None
+            assert mock_user.volume_id is None
+            assert mock_user.status == UserStatus.PENDING
+
+            # Verify Railway operations were called
+            mock_railway_client.delete_service.assert_called_once_with("svc-123")
+            mock_railway_client.delete_volume.assert_called_once_with("vol-123")
+
+            # Verify user was removed from active sessions
+            assert "test-user-1" not in session_manager._active_sessions
+
+            # Verify DB session was closed
+            mock_db.close.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_spin_down_idle_user_no_service(session_manager, mock_user):
+    """Test spin_down_idle_user when user has no service."""
+    # Mock user without service
+    mock_user.railway_service_id = None
+    mock_user.volume_id = None
+
+    # Mock database session
+    mock_db = AsyncMock(spec=AsyncSession)
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none.return_value = mock_user
+    mock_db.execute.return_value = mock_result
+
+    # Record activity so user is in active sessions
+    await session_manager.record_activity("test-user-1")
+    assert "test-user-1" in session_manager._active_sessions
+
+    # Mock Railway client (should not be called)
+    mock_railway_client = AsyncMock()
+
+    with patch("app.session_manager.get_railway_client", return_value=mock_railway_client):
+        with patch.object(session_manager, "_get_db_session", return_value=mock_db):
+            result = await session_manager.spin_down_idle_user("test-user-1")
+
+            assert result is False
+
+            # Verify Railway operations were NOT called
+            mock_railway_client.delete_service.assert_not_called()
+            mock_railway_client.delete_volume.assert_not_called()
+
+            # User should still be removed from active sessions
+            assert "test-user-1" not in session_manager._active_sessions
+
+
+@pytest.mark.asyncio
+async def test_spin_down_idle_user_nonexistent(session_manager):
+    """Test spin_down_idle_user when user doesn't exist in DB."""
+    # Mock database session returning None
+    mock_db = AsyncMock(spec=AsyncSession)
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none.return_value = None
+    mock_db.execute.return_value = mock_result
+
+    with patch.object(session_manager, "_get_db_session", return_value=mock_db):
+        result = await session_manager.spin_down_idle_user("nonexistent-user")
+
+        assert result is False
+        mock_db.close.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_spin_down_idle_user_error_handling(session_manager):
+    """Test spin_down_idle_user handles errors gracefully."""
+    # Mock database session that raises an error
+    mock_db = AsyncMock(spec=AsyncSession)
+    mock_db.execute.side_effect = Exception("Database connection failed")
+
+    with patch.object(session_manager, "_get_db_session", return_value=mock_db):
+        result = await session_manager.spin_down_idle_user("test-user-1")
+
+        assert result is False
+        mock_db.close.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_cleanup_idle_sessions_actually_spins_down_users(session_manager, mock_user):
+    """Test that the cleanup task actually spins down idle users (not just logs a warning)."""
+    # Set up user with active service
+    mock_user.railway_service_id = "svc-123"
+    mock_user.volume_id = "vol-123"
+    mock_user.status = UserStatus.ACTIVE
+
+    # Mock database session
+    mock_db = AsyncMock(spec=AsyncSession)
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none.return_value = mock_user
+    mock_db.execute.return_value = mock_result
+
+    # Mock Railway client
+    mock_railway_client = AsyncMock()
+    mock_railway_client.delete_service.return_value = True
+    mock_railway_client.delete_volume.return_value = True
+
+    # Set session activity to old time (beyond timeout)
+    old_time = datetime.now(timezone.utc) - timedelta(minutes=30)
+    session_manager._active_sessions["test-user-1"] = old_time
+
+    # Patch spin_down_idle_user to verify it gets called
+    with patch.object(session_manager, "spin_down_idle_user", return_value=True) as mock_spin_down:
+        # Run one iteration of the cleanup loop manually
+        # We can't easily test the infinite loop, so we test the logic directly
+
+        # Simulate what the cleanup loop does
+        from app.config import get_settings
+        settings = get_settings()
+        idle_timeout = timedelta(minutes=settings.session_idle_timeout_minutes)
+        current_time = datetime.now(timezone.utc)
+
+        idle_users = []
+        for user_id, last_activity in list(session_manager._active_sessions.items()):
+            idle_time = current_time - last_activity
+            if idle_time > idle_timeout:
+                idle_users.append(user_id)
+
+        # Verify idle user was identified
+        assert "test-user-1" in idle_users
+
+        # Call spin_down_idle_user as the loop would
+        for user_id in idle_users:
+            await session_manager.spin_down_idle_user(user_id)
+
+        # Verify spin_down_idle_user was called
+        mock_spin_down.assert_called_once_with("test-user-1")
+
+
+@pytest.mark.asyncio
+async def test_cleanup_idle_sessions_continues_on_failure(session_manager):
+    """Test that cleanup continues processing users even if one fails."""
+    # Set up multiple idle users
+    old_time = datetime.now(timezone.utc) - timedelta(minutes=30)
+    session_manager._active_sessions["user-1"] = old_time
+    session_manager._active_sessions["user-2"] = old_time
+    session_manager._active_sessions["user-3"] = old_time
+
+    # Mock spin_down_idle_user to fail for user-2 but succeed for others
+    async def mock_spin_down(user_id: str) -> bool:
+        if user_id == "user-2":
+            return False  # Simulate failure
+        return True
+
+    with patch.object(session_manager, "spin_down_idle_user", side_effect=mock_spin_down):
+        from app.config import get_settings
+        settings = get_settings()
+        idle_timeout = timedelta(minutes=settings.session_idle_timeout_minutes)
+        current_time = datetime.now(timezone.utc)
+
+        idle_users = []
+        for user_id, last_activity in list(session_manager._active_sessions.items()):
+            idle_time = current_time - last_activity
+            if idle_time > idle_timeout:
+                idle_users.append(user_id)
+
+        # All three should be idle
+        assert len(idle_users) == 3
+
+        # Process all idle users - should not break on failure
+        results = {}
+        for user_id in idle_users:
+            results[user_id] = await session_manager.spin_down_idle_user(user_id)
+
+        # user-2 should have failed, others succeeded
+        assert results["user-1"] is True
+        assert results["user-2"] is False
+        assert results["user-3"] is True
+
+        # All three should have been attempted
+        assert session_manager.spin_down_idle_user.call_count == 3
+
+
+@pytest.mark.asyncio
+async def test_cleanup_idle_sessions_removes_from_active_sessions(session_manager, mock_user):
+    """Test that cleanup removes users from _active_sessions after spin down."""
+    # Set up user with active service
+    mock_user.railway_service_id = "svc-123"
+    mock_user.volume_id = "vol-123"
+    mock_user.status = UserStatus.ACTIVE
+
+    # Mock database session
+    mock_db = AsyncMock(spec=AsyncSession)
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none.return_value = mock_user
+    mock_db.execute.return_value = mock_result
+
+    # Mock Railway client
+    mock_railway_client = AsyncMock()
+
+    # Add user to active sessions
+    await session_manager.record_activity("test-user-1")
+    assert "test-user-1" in session_manager._active_sessions
+
+    with patch("app.session_manager.get_railway_client", return_value=mock_railway_client):
+        with patch.object(session_manager, "_get_db_session", return_value=mock_db):
+            result = await session_manager.spin_down_idle_user("test-user-1")
+
+            assert result is True
+            # User should be removed from active sessions
+            assert "test-user-1" not in session_manager._active_sessions

@@ -9,6 +9,7 @@ import structlog
 from app.models import User, UserStatus
 from app.railway import RailwayClient, get_railway_client
 from app.config import get_settings
+from app.database import init_db, _session_factory
 
 logger = structlog.get_logger()
 
@@ -75,26 +76,24 @@ class SessionManager:
                 user = result.scalar_one_or_none()
 
                 if not user:
-                    logger.error(f"User not found: {user_id}")
+                    logger.error("user_not_found", user_id=user_id)
                     return False, None
 
                 # Check if user already has a service
                 if user.railway_service_id:
-                    logger.info(f"User {user_id} already has service {user.railway_service_id}")
+                    logger.info("user_already_has_service", user_id=user_id, service_id=user.railway_service_id)
                     return False, None
 
                 # Spin up new service
-                logger.info(f"Spinning up service for user {user_id}")
+                logger.info("spinning_up_service", user_id=user_id)
                 await self._spin_up_service(db, user, user_id)
                 await db.commit()
 
                 return True, None
 
             except Exception as e:
-                logger.error(f"Error ensuring user service for {user_id}: {e}")
+                logger.error("ensure_user_service_error", user_id=user_id, error=str(e))
                 raise
-            finally:
-                self._remove_lock(user_id)
 
     async def _spin_up_service(
         self,
@@ -317,6 +316,64 @@ class SessionManager:
             logger.error(f"Error getting service status for {user_id}: {e}")
             return None
 
+    async def _get_db_session(self) -> AsyncSession:
+        """Create and return a new async database session.
+
+        This method is used by the cleanup task which operates independently
+        of request lifecycle and cannot receive injected sessions.
+
+        Returns:
+            A new AsyncSession instance
+        """
+        if _session_factory is None:
+            init_db()
+        return _session_factory()
+
+    async def spin_down_idle_user(self, user_id: str) -> bool:
+        """Spin down an idle user's Railway service.
+
+        Creates its own database session since the cleanup task runs
+        independently of request lifecycle.
+
+        Args:
+            user_id: User ID to spin down service for
+
+        Returns:
+            True if service was spun down, False otherwise
+        """
+        db = await self._get_db_session()
+        try:
+            # Get user from database
+            result = await db.execute(select(User).where(User.id == user_id))
+            user = result.scalar_one_or_none()
+
+            if not user:
+                logger.error(f"User not found during idle cleanup: {user_id}")
+                return False
+
+            if not user.railway_service_id:
+                logger.info(f"User {user_id} has no service to spin down during idle cleanup")
+                # Still remove from active sessions since they have no service
+                if user_id in self._active_sessions:
+                    del self._active_sessions[user_id]
+                return False
+
+            await self._spin_down_service(db, user, user_id)
+            await db.commit()
+
+            # Remove from active sessions
+            if user_id in self._active_sessions:
+                del self._active_sessions[user_id]
+
+            logger.info(f"Successfully spun down idle user {user_id}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Error spinning down idle user {user_id}: {e}")
+            return False
+        finally:
+            await db.close()
+
     async def _cleanup_idle_sessions(self) -> None:
         """Background task to clean up idle sessions."""
         settings = get_settings()
@@ -330,17 +387,19 @@ class SessionManager:
                 idle_users = []
 
                 # Find idle users
-                for user_id, last_activity in self._active_sessions.items():
+                for user_id, last_activity in list(self._active_sessions.items()):
                     idle_time = current_time - last_activity
                     if idle_time > idle_timeout:
                         idle_users.append(user_id)
 
                 # Spin down services for idle users
                 for user_id in idle_users:
-                    logger.info(f"User {user_id} idle for {idle_time}, spinning down service")
-                    # We need a DB session here - this is a limitation of the current design
-                    # In production, we'd inject the DB session differently
-                    logger.warning(f"Cannot spin down service for idle user {user_id} without DB session")
+                    try:
+                        logger.info(f"User {user_id} idle, spinning down service")
+                        await self.spin_down_idle_user(user_id)
+                    except Exception as e:
+                        # Log error but continue processing other users
+                        logger.error(f"Failed to spin down idle user {user_id}: {e}")
 
             except asyncio.CancelledError:
                 logger.info("Cleanup task cancelled")

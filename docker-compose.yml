@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   postgres:
     image: postgres:16-alpine
@@ -49,10 +47,10 @@ services:
       # Redis
       REDIS_URL: redis://redis:6379/0
       # Railway
-      RAILWAY_API_TOKEN: ${RAILWAY_API_TOKEN}
-      RAILWAY_PROJECT_ID: ${RAILWAY_PROJECT_ID}
-      RAILWAY_TEAM_ID: ${RAILWAY_TEAM_ID}
-      RAILWAY_ENVIRONMENT_ID: ${RAILWAY_ENVIRONMENT_ID}
+      RAILWAY_API_TOKEN: ${RAILWAY_API_TOKEN:-}
+      RAILWAY_PROJECT_ID: ${RAILWAY_PROJECT_ID:-}
+      RAILWAY_TEAM_ID: ${RAILWAY_TEAM_ID:-}
+      RAILWAY_ENVIRONMENT_ID: ${RAILWAY_ENVIRONMENT_ID:-}
       # Admin
       ADMIN_AGENT_API_KEY: ${ADMIN_AGENT_API_KEY:-dev-admin-key}
       # Session
@@ -60,6 +58,15 @@ services:
       SESSION_MAX_LIFETIME_HOURS: ${SESSION_MAX_LIFETIME_HOURS:-24}
       # Agent
       AGENT_DOCKER_IMAGE: ${AGENT_DOCKER_IMAGE:-carbon-agent-adapter:latest}
+      # Clerk Authentication
+      CLERK_SECRET_KEY: ${CLERK_SECRET_KEY:-}
+      CLERK_PUBLISHABLE_KEY: ${CLERK_PUBLISHABLE_KEY:-}
+      CLERK_WEBHOOK_SECRET: ${CLERK_WEBHOOK_SECRET:-}
+      CLERK_JWT_PUBLIC_KEY: ${CLERK_JWT_PUBLIC_KEY:-}
+      # CORS
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:8000}
+      # Deployment — disable auto-create in compose; Alembic handles migrations
+      AUTO_CREATE_TABLES: "false"
     depends_on:
       postgres:
         condition: service_healthy
@@ -87,9 +94,13 @@ services:
       DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/carbon_platform
       # Agent Zero
       AGENT_API_URL: ${AGENT_API_URL:-http://agent-zero:5000}
-      AGENT_API_KEY: ${AGENT_API_KEY}
+      AGENT_API_KEY: ${AGENT_API_KEY:-}
       # LLM
       MODEL_NAME: ${MODEL_NAME:-carbon-agent}
+      # Per-user Railway routing
+      RAILWAY_SERVICE_URL_TEMPLATE: ${RAILWAY_SERVICE_URL_TEMPLATE:-}
+      # Adapter user ID (for standalone mode)
+      USER_ID: ${ADAPTER_USER_ID:-}
     depends_on:
       postgres:
         condition: service_healthy
@@ -105,15 +116,40 @@ services:
           memory: 512M
 
   open-webui:
-    image: ghcr.io/open-webui/open-webui:main
+    build:
+      context: ./open-webui
+      dockerfile: Dockerfile
     ports:
       - "${WEBUI_PORT:-3000}:8080"
     environment:
+      # OpenAI/Adapter Configuration
       OPENAI_API_BASE_URL: http://adapter:8000/v1
       OPENAI_API_KEY: ${OPENWEBUI_API_KEY:-sk-dev-test-key}
       WEBUI_SECRET_KEY: ${WEBUI_SECRET:-dev-secret}
+
+      # Clerk Integration
+      CLERK_ENABLED: ${OPENWEBUI_CLERK_ENABLED:-true}
+      CLERK_PUBLISHABLE_KEY: ${CLERK_PUBLISHABLE_KEY:-}
+      CLERK_SECRET_KEY: ${CLERK_SECRET_KEY:-}
+      CLERK_FRONTEND_API_URL: ${CLERK_FRONTEND_API_URL:-}
+
+      # Orchestrator Integration
+      ORCHESTRATOR_URL: http://orchestrator:8000
+      ADAPTER_URL: http://adapter:8000
+
+      # Feature Flags
+      ENABLE_SIGNUP: "false"
+      WEBUI_AUTH: "true"
+      DEFAULT_USER_ROLE: user
+
+      # CORS & Network
+      CORS_ALLOW_ORIGIN: "*"
+      REQUEST_TIMEOUT_SECONDS: 120
+      MAX_CONCURRENT_REQUESTS: 10
+
     depends_on:
       - adapter
+      - orchestrator
     volumes:
       - openwebui:/app/backend/data
     healthcheck:
@@ -125,6 +161,10 @@ services:
       resources:
         limits:
           memory: 2G
+    networks:
+      default:
+        aliases:
+          - open-webui
 
 volumes:
   pgdata:

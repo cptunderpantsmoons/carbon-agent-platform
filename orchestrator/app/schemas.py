@@ -18,6 +18,22 @@ class UserResponse(BaseModel):
     email: str
     display_name: str
     status: UserStatus
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class UserWithApiKeyResponse(BaseModel):
+    """Response schema that includes the API key.
+
+    Only used for admin user creation and API key rotation,
+    where the caller needs to see the key.
+    """
+    id: str
+    email: str
+    display_name: str
+    status: UserStatus
     api_key: str
     created_at: datetime
     updated_at: datetime

@@ -9,7 +9,7 @@ from sqlalchemy import select, func
 from app.database import get_session
 from app.models import User, AuditLog, UserStatus
 from app.schemas import (
-    UserCreate, UserResponse, UserUpdate,
+    UserCreate, UserResponse, UserUpdate, UserWithApiKeyResponse,
     AdminCommand, AdminResponse,
     PlatformHealth,
 )
@@ -45,13 +45,13 @@ async def platform_health(
     )
 
 
-@admin_router.post("/users", response_model=UserResponse)
+@admin_router.post("/users", response_model=UserWithApiKeyResponse)
 async def create_user(
     data: UserCreate,
     db: AsyncSession = Depends(get_session),
     _: str = Depends(verify_admin_key),
 ):
-    """Create a new user."""
+    """Create a new user. Returns api_key on creation only."""
     user = User(
         id=str(uuid.uuid4()),
         email=data.email,
@@ -172,3 +172,64 @@ async def admin_command(
         message=f"Command '{command.command}' acknowledged. Use specific endpoints for execution.",
         data=command.context,
     )
+
+
+@admin_router.get("/sessions")
+async def list_active_sessions(
+    db: AsyncSession = Depends(get_session),
+    _: str = Depends(verify_admin_key),
+):
+    """List all users with active Railway services."""
+    result = await db.execute(
+        select(User).where(User.railway_service_id.isnot(None)).order_by(User.updated_at.desc())
+    )
+    active_users = result.scalars().all()
+
+    return {
+        "active_services": len(active_users),
+        "sessions": [
+            {
+                "user_id": u.id,
+                "email": u.email,
+                "display_name": u.display_name,
+                "service_id": u.railway_service_id,
+                "volume_id": u.volume_id,
+                "status": u.status.value,
+                "updated_at": u.updated_at.isoformat() if u.updated_at else None,
+            }
+            for u in active_users
+        ],
+    }
+
+
+@admin_router.get("/metrics")
+async def platform_metrics(
+    db: AsyncSession = Depends(get_session),
+    _: str = Depends(verify_admin_key),
+):
+    """Get platform metrics for the admin dashboard."""
+    total_users = await db.scalar(select(func.count(User.id)))
+    active_users = await db.scalar(
+        select(func.count(User.id)).where(User.status == UserStatus.ACTIVE)
+    )
+    suspended_users = await db.scalar(
+        select(func.count(User.id)).where(User.status == UserStatus.SUSPENDED)
+    )
+    pending_users = await db.scalar(
+        select(func.count(User.id)).where(User.status == UserStatus.PENDING)
+    )
+    active_services = await db.scalar(
+        select(func.count(User.railway_service_id)).where(User.railway_service_id.isnot(None))
+    )
+    total_volumes = await db.scalar(
+        select(func.count(User.volume_id)).where(User.volume_id.isnot(None))
+    )
+
+    return {
+        "total_users": total_users or 0,
+        "active_users": active_users or 0,
+        "suspended_users": suspended_users or 0,
+        "pending_users": pending_users or 0,
+        "active_services": active_services or 0,
+        "total_volumes": total_volumes or 0,
+    }
