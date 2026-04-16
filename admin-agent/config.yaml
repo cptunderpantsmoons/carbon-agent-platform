@@ -1,0 +1,30 @@
+# Carbon Agent Admin Configuration
+orchestrator:
+  url: http://orchestrator.railway.internal:8000
+  admin_key: ${ADMIN_AGENT_API_KEY}
+  health_endpoint: /admin/health
+
+scheduler:
+  health_check:
+    enabled: true
+    interval: "*/5 * * * *"
+    type: scheduled
+  idle_cleanup:
+    enabled: true
+    interval: "*/5 * * * *"
+    type: scheduled
+  daily_report:
+    enabled: true
+    schedule: "0 9 * * *"
+    type: scheduled
+  volume_audit:
+    enabled: true
+    schedule: "0 2 * * 1"
+    type: scheduled
+
+notifications:
+  error_threshold: 3
+  monthly_budget: 100
+  channels:
+    - email
+    - webhook
