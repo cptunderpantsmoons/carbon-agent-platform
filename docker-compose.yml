@@ -6,44 +6,131 @@ services:
     environment:
       POSTGRES_DB: carbon_platform
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 256M
 
   orchestrator:
-    build: ./orchestrator
+    build:
+      context: ./orchestrator
+      dockerfile: Dockerfile
     ports:
-      - "8000:8000"
+      - "${ORCHESTRATOR_PORT:-8000}:8000"
     environment:
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/carbon_platform
-      ADMIN_AGENT_API_KEY: dev-admin-key
+      # Database
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/carbon_platform
+      # Redis
+      REDIS_URL: redis://redis:6379/0
+      # Railway
+      RAILWAY_API_TOKEN: ${RAILWAY_API_TOKEN}
+      RAILWAY_PROJECT_ID: ${RAILWAY_PROJECT_ID}
+      RAILWAY_TEAM_ID: ${RAILWAY_TEAM_ID}
+      RAILWAY_ENVIRONMENT_ID: ${RAILWAY_ENVIRONMENT_ID}
+      # Admin
+      ADMIN_AGENT_API_KEY: ${ADMIN_AGENT_API_KEY:-dev-admin-key}
+      # Session
+      SESSION_IDLE_TIMEOUT_MINUTES: ${SESSION_IDLE_TIMEOUT_MINUTES:-15}
+      SESSION_MAX_LIFETIME_HOURS: ${SESSION_MAX_LIFETIME_HOURS:-24}
+      # Agent
+      AGENT_DOCKER_IMAGE: ${AGENT_DOCKER_IMAGE:-carbon-agent-adapter:latest}
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
 
   adapter:
-    build: ./adapter
+    build:
+      context: ./adapter
+      dockerfile: Dockerfile
     ports:
-      - "8001:8000"
+      - "${ADAPTER_PORT:-8001}:8000"
     environment:
-      AGENT_API_URL: http://host.docker.internal:5000
-      USER_ID: dev-user
-      USER_EMAIL: dev@example.com
+      # Database (shared with orchestrator)
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/carbon_platform
+      # Agent Zero
+      AGENT_API_URL: ${AGENT_API_URL:-http://agent-zero:5000}
+      AGENT_API_KEY: ${AGENT_API_KEY}
+      # LLM
+      MODEL_NAME: ${MODEL_NAME:-carbon-agent}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
 
   open-webui:
     image: ghcr.io/open-webui/open-webui:main
     ports:
-      - "3000:8080"
+      - "${WEBUI_PORT:-3000}:8080"
     environment:
       OPENAI_API_BASE_URL: http://adapter:8000/v1
-      OPENAI_API_KEY: sk-dev-test-key
-      WEBUI_SECRET_KEY: dev-secret
+      OPENAI_API_KEY: ${OPENWEBUI_API_KEY:-sk-dev-test-key}
+      WEBUI_SECRET_KEY: ${WEBUI_SECRET:-dev-secret}
     depends_on:
       - adapter
     volumes:
       - openwebui:/app/backend/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 2G
 
 volumes:
   pgdata:
+  redis_data:
   openwebui:
+
+networks:
+  default:
+    name: carbon_platform_network
