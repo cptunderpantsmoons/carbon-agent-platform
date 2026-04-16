@@ -72,3 +72,22 @@
     - POST /user/me/service/ensure - Ensure service
     - POST /user/me/service/spin-down - Spin down service
     - GET /user/me/service/status - Service status
+
+- [x] **Task 6: Docker & Railway Deployment Configs**
+  - **Status:** ✅ DONE
+  - **Completion Date:** 2026-04-16
+  - **Files Created:**
+    - orchestrator/Dockerfile - Production-ready orchestrator container
+    - docker-compose.yml - Enhanced with Redis, health checks, resource limits
+    - railway.json - Railway deployment configuration
+    - Dockerfile.production - Multi-stage production build
+    - .env.example - Development environment template
+    - .env.production.example - Production environment template
+    - Makefile - Comprehensive build/deployment commands
+    - scripts/deploy.sh - Railway deployment script
+  - **Features:**
+    - PostgreSQL 16 with persistent storage
+    - Redis 7 for caching and sessions
+    - Health checks for all services
+    - Resource limits for production stability
+    - One-command deployment with Railway CLI
