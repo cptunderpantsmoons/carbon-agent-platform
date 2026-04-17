@@ -41,7 +41,7 @@ class Settings(BaseSettings):
     clerk_authorized_origins: str = ""  # Comma-separated list of authorized origins
 
     # CORS
-    cors_allowed_origins: str = ""  # Comma-separated list of allowed origins
+    cors_allowed_origins: str = "http://localhost:3000"  # Comma-separated list of allowed origins
 
     # Scheduler
     health_check_interval_minutes: int = 5

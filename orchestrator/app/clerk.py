@@ -12,6 +12,8 @@ from app.database import get_session
 from app.models import User, AuditLog, UserStatus
 from app.config import get_settings
 from app.session_manager import get_session_manager
+from app.rate_limit import limiter
+from slowapi.util import get_remote_address
 
 import structlog
 
@@ -20,6 +22,23 @@ logger = structlog.get_logger(__name__)
 clerk_webhook_router = APIRouter(prefix="/webhooks", tags=["clerk-webhooks"])
 
 MAX_BODY_SIZE = 1_048_576  # 1 MiB
+
+
+def _prepare_webhook_secret(secret: str) -> str:
+    """Prepare webhook secret for svix library.
+    
+    Svix expects the base64-encoded secret. If the secret has the 'whsec_' prefix,
+    strip it as svix handles the base64 decoding internally.
+    
+    Args:
+        secret: The webhook secret from environment variable.
+        
+    Returns:
+        The prepared secret for svix Webhook.
+    """
+    if secret.startswith("whsec_"):
+        return secret[6:]  # Strip the prefix
+    return secret
 
 
 def _verify_webhook_signature(
@@ -49,8 +68,11 @@ def _verify_webhook_signature(
         logger.error("clerk_webhook_secret_not_configured")
         raise HTTPException(status_code=500, detail="Webhook secret not configured")
 
+    # Prepare secret (strip whsec_ prefix if present)
+    prepared_secret = _prepare_webhook_secret(webhook_secret)
+
     try:
-        wh = Webhook(webhook_secret)
+        wh = Webhook(prepared_secret)
         wh.verify(payload, {
             "svix-id": svix_id,
             "svix-timestamp": svix_timestamp,
@@ -104,6 +126,7 @@ async def _create_audit_log(
 
 
 @clerk_webhook_router.post("/clerk", response_model=None)
+@limiter.limit("30/minute", key_func=get_remote_address)
 async def handle_clerk_webhook(
     request: Request,
     svix_id: str = Header(default="", alias="svix-id"),
@@ -128,11 +151,11 @@ async def handle_clerk_webhook(
     # Require all Svix headers
     if not svix_id or not svix_timestamp or not svix_signature:
         logger.warning("clerk_webhook_missing_svix_headers")
-        raise HTTPException(status_code=401, detail="Missing Svix signature headers")
+        raise HTTPException(status_code=400, detail="Missing Svix signature headers")
 
     # Verify webhook signature using Svix
     if not _verify_webhook_signature(body, svix_id, svix_timestamp, svix_signature):
-        raise HTTPException(status_code=401, detail="Invalid webhook signature")
+        raise HTTPException(status_code=400, detail="Invalid webhook signature")
 
     # Parse the payload
     try:

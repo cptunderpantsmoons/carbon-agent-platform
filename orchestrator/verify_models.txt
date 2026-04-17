@@ -1,0 +1,67 @@
+﻿============================= test session starts =============================
+platform win32 -- Python 3.14.3, pytest-8.4.2, pluggy-1.6.0 -- C:\Users\MoonBuggy\AppData\Local\Python\pythoncore-3.14-64\python.exe
+cachedir: .pytest_cache
+rootdir: C:\Users\MoonBuggy\Documents\carbon agent v2 rail\carbon-agent-platform\orchestrator
+configfile: pytest.ini
+plugins: anyio-4.13.0, asyncio-0.24.0
+asyncio: mode=Mode.AUTO, default_loop_scope=None
+collecting ... collected 14 items
+
+tests/test_models.py::test_create_user PASSED                            [  7%]
+tests/test_models.py::test_user_default_status PASSED                    [ 14%]
+tests/test_models.py::test_user_timestamps PASSED                        [ 21%]
+tests/test_models.py::test_create_session PASSED                         [ 28%]
+tests/test_models.py::test_session_default_status PASSED                 [ 35%]
+tests/test_models.py::test_user_session_relationship PASSED              [ 42%]
+tests/test_models.py::test_session_user_back_populates PASSED            [ 50%]
+tests/test_models.py::test_create_audit_log PASSED                       [ 57%]
+tests/test_models.py::test_audit_log_with_user_id PASSED                 [ 64%]
+tests/test_models.py::test_user_config_json PASSED                       [ 71%]
+tests/test_models.py::test_session_error_state PASSED                    [ 78%]
+tests/test_models.py::test_multiple_sessions_per_user PASSED             [ 85%]
+tests/test_models.py::test_user_nullable_fields PASSED                   [ 92%]
+tests/test_models.py::test_session_nullable_fields PASSED                [100%]
+
+============================== warnings summary ===============================
+..\..\..\..\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\pytest_asyncio\plugin.py:179: 506 warnings
+  C:\Users\MoonBuggy\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\pytest_asyncio\plugin.py:179: DeprecationWarning: 'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead
+    return asyncio.iscoroutinefunction(obj) or inspect.isasyncgenfunction(obj)
+
+..\..\..\..\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\pytest_asyncio\plugin.py:450: 14 warnings
+  C:\Users\MoonBuggy\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\pytest_asyncio\plugin.py:450: DeprecationWarning: 'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead
+    return asyncio.iscoroutinefunction(func)
+
+tests/test_models.py::test_create_user
+  C:\Users\MoonBuggy\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\pytest_asyncio\plugin.py:1056: DeprecationWarning: 'asyncio.get_event_loop_policy' is deprecated and slated for removal in Python 3.16
+    return asyncio.get_event_loop_policy()
+
+tests/test_models.py: 14 warnings
+  C:\Users\MoonBuggy\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\pytest_asyncio\plugin.py:773: DeprecationWarning: 'asyncio.get_event_loop_policy' is deprecated and slated for removal in Python 3.16
+    _restore_event_loop_policy(asyncio.get_event_loop_policy()),
+
+tests/test_models.py: 14 warnings
+  C:\Users\MoonBuggy\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\pytest_asyncio\plugin.py:1028: DeprecationWarning: 'asyncio.set_event_loop_policy' is deprecated and slated for removal in Python 3.16
+    asyncio.set_event_loop_policy(new_loop_policy)
+
+tests/test_models.py: 14 warnings
+  C:\Users\MoonBuggy\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\pytest_asyncio\plugin.py:1029: DeprecationWarning: 'asyncio.get_event_loop_policy' is deprecated and slated for removal in Python 3.16
+    loop = asyncio.get_event_loop_policy().new_event_loop()
+
+tests/test_models.py: 14 warnings
+  C:\Users\MoonBuggy\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\pytest_asyncio\plugin.py:788: DeprecationWarning: 'asyncio.get_event_loop_policy' is deprecated and slated for removal in Python 3.16
+    policy = asyncio.get_event_loop_policy()
+
+tests/test_models.py: 14 warnings
+  C:\Users\MoonBuggy\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\pytest_asyncio\plugin.py:833: DeprecationWarning: 'asyncio.get_event_loop_policy' is deprecated and slated for removal in Python 3.16
+    policy = asyncio.get_event_loop_policy()
+
+tests/test_models.py: 14 warnings
+  C:\Users\MoonBuggy\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\pytest_asyncio\plugin.py:857: DeprecationWarning: 'asyncio.set_event_loop_policy' is deprecated and slated for removal in Python 3.16
+    asyncio.set_event_loop_policy(previous_policy)
+
+tests/test_models.py: 14 warnings
+  C:\Users\MoonBuggy\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\pytest_asyncio\plugin.py:869: DeprecationWarning: 'asyncio.get_event_loop_policy' is deprecated and slated for removal in Python 3.16
+    policy = asyncio.get_event_loop_policy()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+====================== 14 passed, 619 warnings in 0.75s =======================

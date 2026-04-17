@@ -7,9 +7,10 @@ from sqlalchemy import select
 
 from app.database import get_session
 from app.models import User, AuditLog, UserStatus
-from app.schemas import UserResponse, UserUpdate
+from app.schemas import UserResponse, UserUpdate, ApiKeyRotateResponse
 from app.session_manager import get_session_manager
 from app.api_key_injection import invalidate_api_key_cache
+from app.rate_limit import limiter, _get_user_id_or_ip
 from typing import Optional
 
 import structlog
@@ -55,6 +56,7 @@ async def verify_user_api_key(
 
 
 @user_router.get("/me", response_model=UserResponse)
+@limiter.limit("60/minute", key_func=_get_user_id_or_ip)
 async def get_my_profile(
     request: Request,
     user: User = Depends(verify_user_api_key),
@@ -64,7 +66,9 @@ async def get_my_profile(
 
 
 @user_router.patch("/me", response_model=UserResponse)
+@limiter.limit("60/minute", key_func=_get_user_id_or_ip)
 async def update_my_profile(
+    request: Request,
     data: UserUpdate,
     user: User = Depends(verify_user_api_key),
     db: AsyncSession = Depends(get_session),
@@ -90,7 +94,9 @@ async def update_my_profile(
 
 
 @user_router.get("/me/session")
+@limiter.limit("60/minute", key_func=_get_user_id_or_ip)
 async def get_my_session_info(
+    request: Request,
     user: User = Depends(verify_user_api_key),
 ):
     """Get current user's session information."""
@@ -109,7 +115,9 @@ async def get_my_session_info(
 
 
 @user_router.post("/me/session/refresh")
+@limiter.limit("60/minute", key_func=_get_user_id_or_ip)
 async def refresh_session(
+    request: Request,
     user: User = Depends(verify_user_api_key),
     db: AsyncSession = Depends(get_session),
 ):
@@ -121,7 +129,9 @@ async def refresh_session(
 
 
 @user_router.post("/me/service/ensure")
+@limiter.limit("60/minute", key_func=_get_user_id_or_ip)
 async def ensure_my_service(
+    request: Request,
     user: User = Depends(verify_user_api_key),
     db: AsyncSession = Depends(get_session),
 ):
@@ -136,7 +146,9 @@ async def ensure_my_service(
 
 
 @user_router.post("/me/service/spin-down")
+@limiter.limit("60/minute", key_func=_get_user_id_or_ip)
 async def spin_down_my_service(
+    request: Request,
     user: User = Depends(verify_user_api_key),
     db: AsyncSession = Depends(get_session),
 ):
@@ -151,7 +163,9 @@ async def spin_down_my_service(
 
 
 @user_router.get("/me/service/status")
+@limiter.limit("60/minute", key_func=_get_user_id_or_ip)
 async def get_my_service_status(
+    request: Request,
     user: User = Depends(verify_user_api_key),
     db: AsyncSession = Depends(get_session),
 ):
@@ -172,8 +186,10 @@ async def get_my_service_status(
     }
 
 
-@user_router.post("/me/api-key/rotate")
+@user_router.post("/me/api-key/rotate", response_model=ApiKeyRotateResponse)
+@limiter.limit("60/minute", key_func=_get_user_id_or_ip)
 async def rotate_my_api_key(
+    request: Request,
     user: User = Depends(verify_user_api_key),
     db: AsyncSession = Depends(get_session),
 ):

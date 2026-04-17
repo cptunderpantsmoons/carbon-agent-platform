@@ -4,8 +4,6 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
-from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
@@ -19,12 +17,10 @@ from app.session_manager import get_session_manager
 from app.scheduler import get_scheduler
 from app.api_key_injection import ApiKeyInjectionMiddleware
 from app.config import get_settings
+from app.rate_limit import limiter, rate_limit_exceeded_handler
 import structlog
 
 logger = structlog.get_logger()
-
-# Rate limiter - uses remote IP as default key
-limiter = Limiter(key_func=get_remote_address)
 
 
 class DBSessionMiddleware(BaseHTTPMiddleware):
@@ -105,7 +101,7 @@ app.add_middleware(ApiKeyInjectionMiddleware)
 
 # Rate limiting
 app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
 app.add_middleware(SlowAPIMiddleware)
 
 # Mount admin, user, auth, Clerk webhook, and admin UI routes

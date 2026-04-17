@@ -3,7 +3,7 @@
 Provides the /api/v1/auth/get-api-key endpoint used by the Open WebUI
 clerk-integration.js to fetch the user's API key after Clerk authentication.
 """
-from fastapi import APIRouter, Depends, HTTPException, Header
+from fastapi import APIRouter, Depends, HTTPException, Header, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,6 +11,7 @@ from app.clerk_auth import get_clerk_jwks_for_verification, verify_clerk_token
 from app.models import User, UserStatus
 from app.config import get_settings
 from app.database import get_session
+from app.rate_limit import limiter, _get_user_id_or_ip
 
 import structlog
 
@@ -20,7 +21,9 @@ auth_router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 
 
 @auth_router.get("/get-api-key")
+@limiter.limit("60/minute", key_func=_get_user_id_or_ip)
 async def get_api_key(
+    request: Request,
     authorization: str = Header(default=""),
     db: AsyncSession = Depends(get_session),
     jwks_override: dict | None = Depends(get_clerk_jwks_for_verification),
@@ -79,7 +82,8 @@ async def get_api_key(
 
 
 @auth_router.get("/clerk-status")
-async def clerk_status():
+@limiter.limit("60/minute", key_func=_get_user_id_or_ip)
+async def clerk_status(request: Request):
     """Check if Clerk authentication is configured and available.
 
     Returns:

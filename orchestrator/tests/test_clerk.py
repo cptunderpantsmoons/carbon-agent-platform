@@ -178,11 +178,11 @@ class TestWebhookSignatureVerification:
                     **headers,
                 },
             )
-            assert response.status_code == 401
+            assert response.status_code == 400
             assert "Invalid webhook signature" in response.json().get("detail", "")
 
     def test_missing_svix_headers(self, client):
-        """Test that missing Svix headers returns 401."""
+        """Test that missing Svix headers returns 400."""
         with patch("app.clerk.get_settings") as mock_settings:
             mock_settings.return_value = MagicMock(clerk_webhook_secret=WEBHOOK_SECRET)
 
@@ -194,11 +194,11 @@ class TestWebhookSignatureVerification:
                 content=body,
                 headers={"Content-Type": "application/json"},
             )
-            assert response.status_code == 401
+            assert response.status_code == 400
             assert "Missing Svix signature headers" in response.json().get("detail", "")
 
     def test_partial_svix_headers_missing_id(self, client):
-        """Test that missing svix-id header returns 401."""
+        """Test that missing svix-id header returns 400."""
         with patch("app.clerk.get_settings") as mock_settings:
             mock_settings.return_value = MagicMock(clerk_webhook_secret=WEBHOOK_SECRET)
 
@@ -215,7 +215,7 @@ class TestWebhookSignatureVerification:
                     **headers,
                 },
             )
-            assert response.status_code == 401
+            assert response.status_code == 400
 
     def test_old_timestamp_rejected(self, client):
         """Test that Svix timestamp older than 5 minutes is rejected."""
@@ -241,13 +241,13 @@ class TestWebhookSignatureVerification:
                     "svix-signature": signature,
                 },
             )
-            assert response.status_code == 401
+            assert response.status_code == 400
 
     def test_malformed_json_payload(self, client):
         """Test that malformed JSON returns appropriate error.
 
         Note: The Svix library internally parses JSON during verification,
-        so malformed JSON fails signature verification (401) rather than
+        so malformed JSON fails signature verification (400) rather than
         reaching our JSON parser (400). This is correct security behavior -
         we don't process unverified payloads.
         """
@@ -265,8 +265,8 @@ class TestWebhookSignatureVerification:
                     **headers,
                 },
             )
-            # Svix verify fails on malformed JSON, returns 401
-            assert response.status_code in (400, 401)
+            # Svix verify fails on malformed JSON, returns 400
+            assert response.status_code == 400
 
     def test_oversized_payload_rejected(self, client):
         """Test that payload larger than 1 MiB is rejected."""
@@ -627,6 +627,35 @@ class TestHelperFunctions:
 
         keys = [_generate_api_key() for _ in range(100)]
         assert len(set(keys)) == 100  # All unique
+
+    def test_prepare_webhook_secret_with_prefix(self):
+        """Test that whsec_ prefix is stripped from webhook secret."""
+        from app.clerk import _prepare_webhook_secret
+        
+        secret_with_prefix = "whsec_abc123def456"
+        result = _prepare_webhook_secret(secret_with_prefix)
+        assert result == "abc123def456"
+        assert not result.startswith("whsec_")
+
+    def test_prepare_webhook_secret_without_prefix(self):
+        """Test that secret without prefix is returned unchanged."""
+        from app.clerk import _prepare_webhook_secret
+        
+        secret_without_prefix = "abc123def456"
+        result = _prepare_webhook_secret(secret_without_prefix)
+        assert result == "abc123def456"
+
+    def test_prepare_webhook_secret_with_real_base64_secret(self):
+        """Test preparing a real base64-encoded webhook secret."""
+        from app.clerk import _prepare_webhook_secret
+        
+        # This is how Clerk provides webhook secrets
+        raw_secret = "dGVzdF9zZWNyZXRfa2V5XzEyMzQ1Njc4"
+        secret_with_prefix = f"whsec_{raw_secret}"
+        
+        result = _prepare_webhook_secret(secret_with_prefix)
+        assert result == raw_secret
+        assert not result.startswith("whsec_")
 
 
 # --- Clerk Auth Middleware Tests ---

@@ -2,7 +2,7 @@
 import pytest
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from app.database import Base
-from app.models import User, Session
+from app.models import User
 
 
 @pytest.fixture

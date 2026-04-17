@@ -47,6 +47,16 @@ class UserUpdate(BaseModel):
     config: dict | None = None
 
 
+class ApiKeyRotateResponse(BaseModel):
+    """Response schema for API key rotation.
+
+    Only returned by POST /user/me/api-key/rotate endpoint.
+    """
+    status: str
+    new_api_key: str
+    message: str
+
+
 # --- Admin schemas ---
 
 class AdminCommand(BaseModel):

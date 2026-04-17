@@ -1,0 +1,4 @@
+UserResponse fields: ['id', 'email', 'display_name', 'status', 'created_at', 'updated_at']
+ApiKeyRotateResponse fields: ['status', 'new_api_key', 'message']
+api_key in UserResponse: False
+new_api_key in ApiKeyRotateResponse: True
