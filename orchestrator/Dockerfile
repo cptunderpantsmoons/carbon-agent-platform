@@ -1,4 +1,6 @@
-FROM python:3.12-slim
+# Pinned to the same digest used in Dockerfile.production for consistency.
+# Refresh the digest periodically: docker pull python:3.12-slim && docker inspect python:3.12-slim
+FROM python:3.12-slim@sha256:b288e8a0ad27e238ad9cc31f5b40a6278b983c91781a1e38c3e61a4a16a4e5b1
 
 WORKDIR /app
 

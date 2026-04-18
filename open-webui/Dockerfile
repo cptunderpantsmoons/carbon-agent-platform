@@ -1,130 +1,75 @@
-# Custom Open WebUI Dockerfile for The Intelligence Hub
-# Extends the official Open WebUI image with Clerk integration
+# Custom Open WebUI image for The Intelligence Hub.
+# Extends the official Open WebUI image with Clerk authentication and
+# environment-variable-driven configuration substitution.
+#
+# Base image digest pinned for reproducibility.
+# To refresh: docker buildx imagetools inspect ghcr.io/open-webui/open-webui:main
+#   Index  (multi-arch): sha256:b8095f79a6a8ffad8f830bdacc9b5b0aef805689b31bca0b065cc2424d3cfaeb
+#   linux/amd64:         sha256:d6ac2a75e069cfca698b3e8ed895c0cf75f5698a31f3d9dc0713ed4af2cc3385
+#   linux/arm64:         sha256:a10c18cd35fa9bcaa7650598c1699609db1292ce4fc89499b5eaf93ac435f380
+FROM ghcr.io/open-webui/open-webui:main@sha256:b8095f79a6a8ffad8f830bdacc9b5b0aef805689b31bca0b065cc2424d3cfaeb
 
-FROM ghcr.io/open-webui/open-webui:main
-
-# Labels
 LABEL maintainer="Carbon Agent Platform"
 LABEL description="The Intelligence Hub - Open WebUI with Clerk Integration"
 
-# Set environment variables for Clerk integration
+# Open WebUI runtime flags
 ENV CLERK_ENABLED=true
 ENV ENABLE_SIGNUP=false
 ENV WEBUI_AUTH=true
 
-# Switch to root for file operations
+# File operations require root; we drop privileges before ENTRYPOINT
 USER root
 
-# Create directory for custom scripts
-RUN mkdir -p /app/static \
-    && mkdir -p /app/backend/data
+# Install gettext-base for envsubst (used in entrypoint.sh at container startup)
+RUN apt-get update && apt-get install -y --no-install-recommends gettext-base \
+    && rm -rf /var/lib/apt/lists/*
 
-# Copy Clerk integration script
+# Create a dedicated non-root user for running Open WebUI
+RUN groupadd -r webui && useradd -r -g webui -u 1000 -d /app -s /sbin/nologin webui
+
+# Ensure required directories exist
+RUN mkdir -p /app/static /app/backend/data
+
+# ── Copy custom assets ─────────────────────────────────────────────────────────
 COPY clerk-integration.js /app/static/clerk-integration.js
-RUN chmod 644 /app/static/clerk-integration.js
+COPY config.json.template /app/backend/data/config.json.template
+COPY custom-theme.css     /app/static/custom-theme.css
+COPY entrypoint.sh        /app/entrypoint.sh
 
-# Copy custom configuration
-COPY config.json /app/backend/data/config.json
-RUN chmod 644 /app/backend/data/config.json
+RUN chmod +x /app/entrypoint.sh \
+    && chmod 644 /app/static/clerk-integration.js \
+                 /app/static/custom-theme.css \
+                 /app/backend/data/config.json.template
 
-# Create custom theme CSS for white-label branding
-RUN cat > /app/static/custom-theme.css << 'EOF'
-/* The Intelligence Hub - Custom Theme */
-:root {
-  --primary-color: #00D4AA;
-  --secondary-color: #1A1A2E;
-  --accent-color: #16213E;
-  --background-color: #0F0F23;
-  --text-color: #E0E0E0;
+# ── Inject clerk-integration.js at build time ──────────────────────────────────
+# Done here (as root) so the entrypoint does not need write access to /app/build.
+# The entrypoint checks for the script tag and skips re-injection if already present.
+RUN if [ -f /app/build/index.html ]; then \
+        grep -q 'clerk-integration.js' /app/build/index.html \
+            || sed -i 's|</head>|<script src="/static/clerk-integration.js"></script></head>|' \
+                   /app/build/index.html; \
+        echo "[build] clerk-integration.js injected into index.html"; \
+    else \
+        echo "[build] WARNING: /app/build/index.html not found -- injection deferred to entrypoint"; \
+    fi
 
-  /* Open WebUI specific variables */
-  --color-surface-primary: var(--primary-color);
-  --color-background: var(--background-color);
-  --color-text: var(--text-color);
-}
+# ── Set ownership ──────────────────────────────────────────────────────────────
+# Make all of /app readable/executable by everyone so the webui user can run
+# the Open WebUI Python backend.  Grant webui write access only to the dirs it
+# must modify at runtime (config substitution, static uploads).
+RUN chmod -R a+rX /app \
+    && chown -R webui:webui /app/static \
+                            /app/backend/data \
+                            /app/entrypoint.sh
 
-/* Branding overrides */
-.header-logo img {
-  content: url('/static/logo.png');
-}
+# Drop to non-root for the final image layer
+USER webui
 
-/* Custom scrollbars */
-::-webkit-scrollbar {
-  width: 8px;
-}
-
-::-webkit-scrollbar-track {
-  background: var(--secondary-color);
-}
-
-::-webkit-scrollbar-thumb {
-  background: var(--primary-color);
-  border-radius: 4px;
-}
-
-/* Typography */
-body {
-  font-family: 'Inter', system-ui, -apple-system, sans-serif;
-}
-
-/* Button styling */
-.btn-primary {
-  background-color: var(--primary-color);
-  border-color: var(--primary-color);
-  color: var(--secondary-color);
-}
-
-.btn-primary:hover {
-  background-color: #00B894;
-  border-color: #00B894;
-}
-
-/* Card and container styling */
-.card {
-  background-color: var(--accent-color);
-  border: 1px solid rgba(0, 212, 170, 0.1);
-}
-
-/* Chat interface */
-.chat-message.user {
-  background-color: var(--accent-color);
-}
-
-.chat-message.assistant {
-  background-color: var(--secondary-color);
-}
-
-/* Input area */
-.chat-input {
-  background-color: var(--accent-color);
-  border: 1px solid var(--primary-color);
-}
-
-/* Sidebar */
-.sidebar {
-  background-color: var(--secondary-color);
-  border-right: 1px solid rgba(0, 212, 170, 0.1);
-}
-
-/* Loading states */
-.loading-spinner {
-  color: var(--primary-color);
-}
-EOF
-
-# Set proper ownership
-RUN chown -R root:root /app/static \
-    && chown -R root:root /app/backend/data
-
-# Switch back to the default user
-USER root
-
-# Expose the default port
 EXPOSE 8080
 
-# Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
   CMD curl -f http://localhost:8080/health || exit 1
 
-# The entrypoint remains the same as the base image
-# CMD is inherited from the base image
+# entrypoint.sh: envsubst on config.json.template, then exec "$@"
+ENTRYPOINT ["/app/entrypoint.sh"]
+CMD ["/app/backend/start.sh"]

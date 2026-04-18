@@ -1,4 +1,5 @@
 """Clerk webhook handler for user lifecycle events."""
+import asyncio
 import json
 import secrets
 import uuid
@@ -230,7 +231,6 @@ async def _handle_user_created(
         existing_user_by_email.clerk_user_id = clerk_user_id
         if not existing_user_by_email.display_name:
             existing_user_by_email.display_name = display_name
-        await db.commit()
 
         await _create_audit_log(
             db,
@@ -238,7 +238,7 @@ async def _handle_user_created(
             "user.linked_to_clerk",
             {"clerk_user_id": clerk_user_id, "email": email},
         )
-        await db.commit()
+        await db.commit()  # Single atomic commit: user update + audit log
 
         logger.info(
             "clerk_user_linked",
@@ -283,6 +283,16 @@ async def _handle_user_created(
         user_id=user_id,
         email=email,
     )
+
+    # Fire-and-forget Railway provisioning — must not block the webhook response
+    # (Clerk expects a 2xx within 5 s). provision_user_background creates its own
+    # DB session so it is safe after this request's session is committed.
+    asyncio.create_task(
+        get_session_manager().provision_user_background(user_id),
+        name=f"provision_{user_id}",
+    )
+    logger.info("railway_provision_task_scheduled", user_id=user_id)
+
     return {
         "status": "success",
         "message": "User provisioned successfully",

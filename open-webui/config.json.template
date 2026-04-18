@@ -1,0 +1,63 @@
+{
+  "openai": {
+    "api_base_url": "http://adapter:8000/v1",
+    "api_key": "$USER_API_KEY",
+    "model_name": "carbon-agent"
+  },
+  "ui": {
+    "title": "$UI_TITLE",
+    "description": "$UI_DESCRIPTION",
+    "logo": "/static/logo.png",
+    "theme": {
+      "primary_color": "$PRIMARY_COLOR",
+      "secondary_color": "$SECONDARY_COLOR",
+      "accent_color": "$ACCENT_COLOR",
+      "background_color": "$BACKGROUND_COLOR",
+      "text_color": "$TEXT_COLOR",
+      "font_family": "$FONT_FAMILY",
+      "custom_css": "/static/custom-theme.css"
+    },
+    "branding": {
+      "favicon": "/static/favicon.ico",
+      "welcome_message": "$WELCOME_MESSAGE",
+      "footer_text": "$FOOTER_TEXT",
+      "show_logo_in_header": true,
+      "show_footer": true
+    }
+  },
+  "features": {
+    "signup_enabled": false,
+    "default_user_role": "user",
+    "admin_only": false,
+    "web_search": true,
+    "image_generation": false,
+    "code_execution": true,
+    "file_upload": true,
+    "conversations_history": true,
+    "shared_conversations": false,
+    "custom_system_prompts": true
+  },
+  "auth": {
+    "type": "clerk",
+    "clerk_enabled": true,
+    "admin_email": "$ADMIN_EMAIL",
+    "jwt_validation": true,
+    "auto_create_users": true,
+    "session_refresh_interval": 300
+  },
+  "clerk": {
+    "publishable_key": "$CLERK_PUBLISHABLE_KEY",
+    "api_url": "https://api.clerk.com",
+    "frontend_api_url": "$CLERK_FRONTEND_API_URL",
+    "sync_user_profile": true,
+    "auto_inject_api_key": true
+  },
+  "proxy": {
+    "adapter_url": "http://adapter:8000",
+    "orchestrator_url": "http://orchestrator:8000",
+    "timeout_seconds": 120,
+    "retry_attempts": 3,
+    "cors_enabled": true,
+    "allowed_origins": ["*"]
+  }
+}

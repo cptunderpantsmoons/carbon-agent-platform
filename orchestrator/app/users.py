@@ -183,6 +183,7 @@ async def get_my_service_status(
         "status": status.get("status"),
         "updated_at": status.get("updated_at"),
         "instances": status.get("instances", []),
+        "service_url": status.get("service_url"),
     }
 
 

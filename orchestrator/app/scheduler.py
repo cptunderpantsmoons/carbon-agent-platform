@@ -10,13 +10,13 @@ import asyncio
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, Any, List
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, text
+from sqlalchemy import delete, select, func, text
 import structlog
 
 from app.models import User, UserStatus, AuditLog
 from app.railway import RailwayClient, get_railway_client
 from app.config import get_settings
-from app.database import init_db, _session_factory
+from app.database import create_session
 
 logger = structlog.get_logger()
 
@@ -68,9 +68,7 @@ class Scheduler:
 
     async def _get_db_session(self) -> AsyncSession:
         """Create and return a new async database session."""
-        if _session_factory is None:
-            init_db()
-        return _session_factory()
+        return create_session()
 
     # ─── Service Health Monitor ───────────────────────────────────────────────
 
@@ -349,17 +347,17 @@ class Scheduler:
             )
             results["preserved_count"] = preserved_result.scalar() or 0
 
-            # Delete non-critical logs older than retention period
-            delete_stmt = (
-                AuditLog.__table__  # type: ignore
-                .delete()
-                .where(
-                    AuditLog.created_at < cutoff_date,
-                    AuditLog.action.notin_(critical_actions),
-                )
+            # Delete non-critical logs older than retention period.
+            # Use ORM-aware DML (sqlalchemy.delete) so the statement plays
+            # nicely with asyncpg and type checkers.  rowcount can be -1 on
+            # some drivers (e.g. SQLite with old aiosqlite), so guard with
+            # max(0, ...) to guarantee a non-negative integer.
+            delete_stmt = delete(AuditLog).where(
+                AuditLog.created_at < cutoff_date,
+                AuditLog.action.notin_(critical_actions),
             )
             delete_result = await db.execute(delete_stmt)
-            results["deleted_count"] = delete_result.rowcount  # type: ignore
+            results["deleted_count"] = max(0, delete_result.rowcount or 0)
 
             # Log the cleanup action itself (this won't be deleted)
             await self._create_audit_log_entry(

@@ -27,6 +27,17 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
     async with _session_factory() as session:
         yield session
 
+def create_session() -> AsyncSession:
+    """Create a bare AsyncSession for use in background tasks.
+
+    Unlike get_session(), this does NOT use an async context manager —
+    the caller is responsible for closing the session (use try/finally).
+    Preferred over importing _session_factory directly in other modules.
+    """
+    if _session_factory is None:
+        init_db()
+    return _session_factory()
+
 async def create_tables():
     if _engine is None:
         init_db()

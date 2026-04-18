@@ -1,4 +1,4 @@
-# Tasks
+﻿# Tasks
 
 ## Active
 
@@ -27,12 +27,19 @@
     - adapter/requirements.txt - Updated with database dependencies
     - adapter/tests/test_auth.py - Authentication and routing tests
   - **Note:** Python 3.14 compatibility issues resolved for deployment
-- [ ] **Task 5: Orchestrator API (Admin & User Endpoints)**
-- [ ] **Task 6: Docker & Railway Deployment Configs**
-- [ ] **Task 7: Admin Agent Scheduler Tasks**
-- [x] **Task 8: Open WebUI Integration Config**
+- [x] **Task 5: Orchestrator API (Admin & User Endpoints)** ✅ (see Done)
+- [x] **Task 6: Docker & Railway Deployment Configs** ✅ (see Done)
+- [ ] **Task 7: Admin Agent Scheduler Tasks** — audit-log retention stub needs real DELETE SQL
+- [x] **Task 8: Open WebUI Integration Config** ✅ (see Done)
 - [ ] **Task 9: Register Admin Scheduler Tasks**
 - [ ] **Task 10: Integration Test Suite**
+
+### Code Review Fixes (moon / code-puppy-79601d)
+
+- [x] **Session 1** — Railway mount stub, `clerk_jwt_issuer`, XSS guard, CORS guard, `page.tsx` scaffold
+- [x] **Session 2** — Railway provisioning wired (P0), Authorization header rewrite (P0), production config guard (P1), WeakValueDictionary spin-lock fix (P1)
+- [x] **Session 3** — Dead `verify_admin_key` removed, open-webui non-root USER, orchestrator + adapter Dockerfile digest pins
+- [x] **Session 4** -- open-webui/Dockerfile: pinned FROM to ghcr.io/open-webui/open-webui:main@sha256:b8095f79a6a8ffad8f830bdacc9b5b0aef805689b31bca0b065cc2424d3cfaeb (multi-arch index via docker buildx imagetools inspect)
 
 ## Waiting On
 

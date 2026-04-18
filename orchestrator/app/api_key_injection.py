@@ -2,7 +2,7 @@
 
 Intercepts requests from the Open WebUI frontend, extracts the Clerk user ID
 from the session token, looks up the user's API key from the database, and
-injects it into request headers before forwarding to the adapter.
+rewrites the Authorization header before forwarding to the adapter.
 """
 import time
 
@@ -10,6 +10,7 @@ from fastapi import Request, Response
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.datastructures import MutableHeaders
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.clerk_auth import get_clerk_jwks_for_verification, verify_clerk_token
@@ -68,9 +69,8 @@ async def _extract_clerk_user_id_from_request(request: Request) -> str | None:
     """Extract Clerk user ID from request headers or session.
 
     Tries multiple strategies:
-    1. Authorization header (Bearer token) - decode without validation
-    2. X-Clerk-User-ID header (if set by frontend middleware)
-    3. Cookie-based session (if applicable)
+    1. X-Clerk-User-ID header (if set by frontend middleware) — cheapest
+    2. Authorization header (Bearer token) — full JWT verification
 
     Args:
         request: The incoming request.
@@ -113,14 +113,14 @@ def invalidate_api_key_cache(clerk_user_id: str) -> None:
 class ApiKeyInjectionMiddleware(BaseHTTPMiddleware):
     """FastAPI middleware that injects API keys into adapter-bound requests.
 
-    This middleware intercepts requests that are meant to be proxied to the
-    adapter service. It extracts the Clerk user ID, looks up the API key,
-    and injects it into the request headers.
+    Intercepts /v1/* and /adapter/* requests (which are destined for the adapter
+    service), extracts the Clerk user ID from the incoming JWT, looks up the
+    user's platform API key, and **rewrites** the Authorization header so the
+    adapter sees a valid platform key rather than the Clerk JWT.
     """
 
     async def dispatch(self, request: Request, call_next) -> Response:
-        """Inject API key into requests destined for the adapter."""
-        # Only process requests that look like adapter calls
+        """Rewrite Authorization header for adapter-bound requests."""
         path = request.url.path
         is_adapter_request = (
             path.startswith("/v1/") or
@@ -156,6 +156,13 @@ class ApiKeyInjectionMiddleware(BaseHTTPMiddleware):
                     )
                     return JSONResponse(status_code=401, content={"detail": "Invalid token"})
 
+                # Rewrite the Authorization header so the adapter receives the
+                # platform API key instead of the Clerk JWT. MutableHeaders
+                # mutates the ASGI scope in-place — no request copy needed.
+                mutable = MutableHeaders(scope=request.scope)
+                mutable["Authorization"] = f"Bearer {api_key}"
+
+                # Also preserve in state for logging / downstream access
                 request.state.api_key = api_key  # type: ignore[attr-defined]
                 logger.debug(
                     "api_key_injected",

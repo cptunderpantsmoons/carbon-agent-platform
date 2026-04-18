@@ -30,18 +30,56 @@ class DBSessionMiddleware(BaseHTTPMiddleware):
         from app.database import get_session
         async for session in get_session():
             request.state.db = session
-            response = await call_next(request)
-            await session.close()
+            try:
+                response = await call_next(request)
+            finally:
+                await session.close()
             return response
-        # Fallback if no session yielded
+        # Fallback if no session yielded (shouldn't happen in practice)
         response = await call_next(request)
         return response
+
+
+def _validate_production_config() -> None:
+    """Fail-fast check for required env vars in production mode.
+
+    Called from lifespan when auto_create_tables=False (i.e. production).
+    Raises ValueError with a descriptive message for any missing critical var.
+    """
+    s = get_settings()
+    missing = []
+
+    required = {
+        "clerk_secret_key":        "CLERK_SECRET_KEY",
+        "clerk_publishable_key":   "CLERK_PUBLISHABLE_KEY",
+        "clerk_frontend_api_url":  "CLERK_FRONTEND_API_URL",
+        "clerk_webhook_secret":    "CLERK_WEBHOOK_SECRET",
+        "railway_api_token":       "RAILWAY_API_TOKEN",
+        "railway_project_id":      "RAILWAY_PROJECT_ID",
+        "railway_team_id":         "RAILWAY_TEAM_ID",
+        "railway_environment_id":  "RAILWAY_ENVIRONMENT_ID",
+        "database_url":            "DATABASE_URL",
+    }
+    for attr, env_name in required.items():
+        val = getattr(s, attr, "")
+        if not val or val in ("", "changeme", "your-token-here"):
+            missing.append(env_name)
+
+    if missing:
+        raise ValueError(
+            f"Production startup aborted. Missing required env vars: {', '.join(missing)}. "
+            "Set them in your Railway / .env.production file."
+        )
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup/shutdown lifecycle."""
     init_db()
+
+    # In production, verify all required env vars before doing anything else.
+    if not get_settings().auto_create_tables:
+        _validate_production_config()
 
     # In dev/test, auto-create tables. In production, rely on Alembic migrations.
     if get_settings().auto_create_tables:
@@ -66,24 +104,38 @@ async def lifespan(app: FastAPI):
     logger.info("orchestrator_stopped")
 
 
-app = FastAPI(
-    title="Carbon Agent Orchestrator",
-    version="2.0.0",
-    lifespan=lifespan,
-)
-
-# Configure CORS from environment variable
+# ── CORS configuration ────────────────────────────────────────────────────────
 _settings = get_settings()
 _cors_origins_str = _settings.cors_allowed_origins.strip()
+
 if _cors_origins_str:
     _cors_origins = [o.strip() for o in _cors_origins_str.split(",") if o.strip()]
-else:
-    # Default to localhost for development
+elif _settings.auto_create_tables:
+    # Development / test mode: allow localhost by default
     _cors_origins = [
         "http://localhost:3000",
         "http://localhost:8000",
         "http://localhost:8001",
     ]
+    logger.warning(
+        "cors_using_localhost_fallback",
+        hint="Set CORS_ALLOWED_ORIGINS explicitly for any non-local deployment.",
+    )
+else:
+    # Production mode (auto_create_tables=False) with no origins configured:
+    # fail fast rather than silently opening CORS to nothing or defaulting to localhost.
+    raise ValueError(
+        "CORS_ALLOWED_ORIGINS must be set in production (auto_create_tables=False). "
+        "Example: CORS_ALLOWED_ORIGINS=https://your-dashboard.example.com"
+    )
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+app = FastAPI(
+    title="Carbon Agent Orchestrator",
+    version="2.0.0",
+    lifespan=lifespan,
+)
 
 app.add_middleware(
     CORSMiddleware,
@@ -93,10 +145,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Add DB session middleware (must be before API key injection)
+# DB session middleware must come before API key injection
 app.add_middleware(DBSessionMiddleware)
 
-# Add API key injection middleware for adapter-bound requests
+# API key injection for adapter-bound requests
 app.add_middleware(ApiKeyInjectionMiddleware)
 
 # Rate limiting
@@ -104,7 +156,7 @@ app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
 app.add_middleware(SlowAPIMiddleware)
 
-# Mount admin, user, auth, Clerk webhook, and admin UI routes
+# Routers
 app.include_router(admin_router)
 app.include_router(admin_ui_router)
 app.include_router(user_router)

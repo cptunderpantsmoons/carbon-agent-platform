@@ -24,7 +24,7 @@ class RailwayClient:
             logger.warning("Railway configuration incomplete. API calls may fail.")
 
         self._client: Optional[Client] = None
-        self._transport: Optional[HTTPAsyncTransport] = None
+        self._transport: Optional[HTTPXAsyncTransport] = None
 
     async def _get_client(self) -> Client:
         """Get or create the GraphQL client."""
@@ -54,13 +54,17 @@ class RailwayClient:
     ) -> dict[str, Any]:
         """Create a new Railway service.
 
+        NOTE: The Railway GraphQL serviceCreate mutation only accepts projectId
+        and name. docker_image / memory / cpu are applied via create_deployment.
+        Volume attachment is handled separately via mount_volume_to_service().
+
         Args:
             name: Service name
-            docker_image: Docker image to deploy
-            memory: Memory allocation (e.g., "1GB")
-            cpu: CPU count
-            volume_id: Optional volume ID to mount
-            env_vars: Optional environment variables
+            docker_image: Applied via create_deployment, not here
+            memory: NOT applied by this call (Railway API limitation)
+            cpu: NOT applied by this call (Railway API limitation)
+            volume_id: Mount separately with mount_volume_to_service()
+            env_vars: Applied via create_deployment, not here
 
         Returns:
             Dictionary containing service ID and details
@@ -70,13 +74,6 @@ class RailwayClient:
         """
         client = await self._get_client()
 
-        # Build variables
-        variables = {
-            "projectId": self.project_id,
-            "name": name,
-        }
-
-        # Build GraphQL mutation
         mutation = """
         mutation createService($projectId: ID!, $name: String!) {
             serviceCreate(projectId: $projectId, name: $name) {
@@ -89,7 +86,10 @@ class RailwayClient:
         """
 
         try:
-            result = await client.execute(gql(mutation), variable_values=variables)
+            result = await client.execute(
+                gql(mutation),
+                variable_values={"projectId": self.project_id, "name": name},
+            )
             service_data = result["serviceCreate"]
             logger.info(f"Created Railway service: {service_data['id']}")
             return service_data
@@ -121,7 +121,7 @@ class RailwayClient:
         """
 
         try:
-            result = await client.execute(gql(mutation), variable_values={"id": service_id})
+            await client.execute(gql(mutation), variable_values={"id": service_id})
             logger.info(f"Deleted Railway service: {service_id}")
             return True
 
@@ -176,10 +176,13 @@ class RailwayClient:
     ) -> dict[str, Any]:
         """Create a new Railway volume.
 
+        Creates the volume object only. Call mount_volume_to_service() afterwards
+        to actually attach it to a service instance.
+
         Args:
             name: Volume name
-            size_gb: Volume size in GB
-            mount_path: Mount path in the container
+            size_gb: Volume size in GB (informational; Railway manages size)
+            mount_path: Intended mount path — passed to mount_volume_to_service()
 
         Returns:
             Dictionary containing volume ID and details
@@ -189,21 +192,20 @@ class RailwayClient:
         """
         client = await self._get_client()
 
-        # First create the volume
         mutation = """
         mutation createVolume($projectId: ID!, $name: String!) {
             volumeCreate(projectId: $projectId, name: $name) {
                 id
                 name
                 projectId
-                size
             }
         }
         """
 
         try:
             result = await client.execute(
-                gql(mutation), variable_values={"projectId": self.project_id, "name": name}
+                gql(mutation),
+                variable_values={"projectId": self.project_id, "name": name},
             )
             volume_data = result["volumeCreate"]
             logger.info(f"Created Railway volume: {volume_data['id']}")
@@ -211,6 +213,88 @@ class RailwayClient:
 
         except TransportQueryError as e:
             logger.error(f"Failed to create Railway volume: {e}")
+            raise
+
+    async def mount_volume_to_service(
+        self,
+        volume_id: str,
+        service_id: str,
+        mount_path: str = "/data",
+    ) -> dict[str, Any]:
+        """Mount a volume to a service in the configured environment.
+
+        Uses the Railway volumeInstanceCreate mutation to attach an existing
+        volume to a service. Must be called after both create_volume() and
+        create_service() succeed.
+
+        Args:
+            volume_id: ID of the volume to attach
+            service_id: ID of the service to attach the volume to
+            mount_path: Container path where the volume will be mounted
+
+        Returns:
+            Dictionary containing the volume instance details (id, mountPath, etc.)
+
+        Raises:
+            TransportQueryError: If the GraphQL query fails
+            ValueError: If environment_id is not configured
+        """
+        if not self.environment_id:
+            raise ValueError(
+                "railway_environment_id must be configured to mount volumes. "
+                "Set the RAILWAY_ENVIRONMENT_ID environment variable."
+            )
+
+        client = await self._get_client()
+
+        mutation = """
+        mutation mountVolume(
+            $volumeId: String!,
+            $serviceId: String!,
+            $environmentId: String!,
+            $mountPath: String!
+        ) {
+            volumeInstanceCreate(input: {
+                volumeId: $volumeId
+                serviceId: $serviceId
+                environmentId: $environmentId
+                mountPath: $mountPath
+            }) {
+                id
+                volumeId
+                serviceId
+                mountPath
+            }
+        }
+        """
+
+        try:
+            result = await client.execute(
+                gql(mutation),
+                variable_values={
+                    "volumeId": volume_id,
+                    "serviceId": service_id,
+                    "environmentId": self.environment_id,
+                    "mountPath": mount_path,
+                },
+            )
+            instance_data = result["volumeInstanceCreate"]
+            logger.info(
+                "volume_mounted",
+                volume_id=volume_id,
+                service_id=service_id,
+                mount_path=mount_path,
+                instance_id=instance_data.get("id"),
+            )
+            return instance_data
+
+        except TransportQueryError as e:
+            logger.error(
+                "volume_mount_failed",
+                volume_id=volume_id,
+                service_id=service_id,
+                error=str(e),
+            )
             raise
 
     async def delete_volume(self, volume_id: str) -> bool:
@@ -236,7 +320,7 @@ class RailwayClient:
         """
 
         try:
-            result = await client.execute(gql(mutation), variable_values={"id": volume_id})
+            await client.execute(gql(mutation), variable_values={"id": volume_id})
             logger.info(f"Deleted Railway volume: {volume_id}")
             return True
 
@@ -264,7 +348,6 @@ class RailwayClient:
                 id
                 name
                 projectId
-                size
                 mountPath
             }
         }
@@ -286,10 +369,12 @@ class RailwayClient:
     ) -> dict[str, Any]:
         """Create a new deployment for a service.
 
+        Sets environment variables on the service then triggers a redeploy.
+
         Args:
             service_id: Service ID to deploy
-            docker_image: Docker image to deploy
-            env_vars: Optional environment variables
+            docker_image: Docker image to deploy (used as source reference)
+            env_vars: Optional environment variables to set before deploying
 
         Returns:
             Dictionary containing deployment ID and details
@@ -299,44 +384,48 @@ class RailwayClient:
         """
         client = await self._get_client()
 
-        # Build environment variables
-        variables_list = []
         if env_vars:
-            for key, value in env_vars.items():
-                variables_list.append({"key": key, "value": value})
+            variables_list = [{"key": k, "value": v} for k, v in env_vars.items()]
+            upsert_mutation = """
+            mutation upsertServiceVariables(
+                $serviceId: ID!,
+                $variables: [ServiceVariableInput!]!
+            ) {
+                serviceVariablesUpsert(serviceId: $serviceId, variables: $variables) {
+                    id
+                }
+            }
+            """
+            try:
+                await client.execute(
+                    gql(upsert_mutation),
+                    variable_values={
+                        "serviceId": service_id,
+                        "variables": variables_list,
+                    },
+                )
+            except TransportQueryError as e:
+                logger.error(f"Failed to set service variables for {service_id}: {e}")
+                raise
 
-        mutation = """
-        mutation upsertServiceVariables($serviceId: ID!, $variables: [ServiceVariableInput!]!) {
-            serviceVariablesUpsert(serviceId: $serviceId, variables: $variables) {
+        deploy_mutation = """
+        mutation redeployService($id: ID!) {
+            serviceRedeploy(id: $id) {
                 id
+                status
+                createdAt
             }
         }
         """
 
         try:
-            # First set environment variables
-            if variables_list:
-                await client.execute(
-                    gql(mutation),
-                    variable_values={"serviceId": service_id, "variables": variables_list},
-                )
-
-            # Then trigger deployment
-            deploy_mutation = """
-            mutation redeployService($id: ID!) {
-                serviceRedeploy(id: $id) {
-                    id
-                    status
-                    createdAt
-                }
-            }
-            """
-
             result = await client.execute(
                 gql(deploy_mutation), variable_values={"id": service_id}
             )
             deployment_data = result["serviceRedeploy"]
-            logger.info(f"Created Railway deployment for service {service_id}: {deployment_data['id']}")
+            logger.info(
+                f"Created Railway deployment for service {service_id}: {deployment_data['id']}"
+            )
             return deployment_data
 
         except TransportQueryError as e:
@@ -364,16 +453,6 @@ class RailwayClient:
                 status
                 createdAt
                 updatedAt
-                domain {
-                    id
-                    serviceId
-                    domain
-                }
-                builder {
-                    id
-                    status
-                    createdAt
-                }
             }
         }
         """
@@ -407,10 +486,11 @@ class RailwayClient:
         query getServices($projectId: ID!) {
             project(id: $projectId) {
                 services {
-                    id
-                    name
-                    updatedAt
-                    status
+                    nodes {
+                        id
+                        name
+                        updatedAt
+                    }
                 }
             }
         }
@@ -420,7 +500,7 @@ class RailwayClient:
             result = await client.execute(
                 gql(query), variable_values={"projectId": effective_project_id}
             )
-            return result["project"]["services"]
+            return result["project"]["services"]["nodes"]
 
         except TransportQueryError as e:
             logger.error(f"Failed to list Railway services: {e}")
@@ -447,10 +527,12 @@ class RailwayClient:
         query getVolumes($projectId: ID!) {
             project(id: $projectId) {
                 volumes {
-                    id
-                    name
-                    size
-                    mountPath
+                    edges {
+                        node {
+                            id
+                            name
+                        }
+                    }
                 }
             }
         }
@@ -460,7 +542,10 @@ class RailwayClient:
             result = await client.execute(
                 gql(query), variable_values={"projectId": effective_project_id}
             )
-            return result["project"]["volumes"]
+            return [
+                edge["node"]
+                for edge in result["project"]["volumes"]["edges"]
+            ]
 
         except TransportQueryError as e:
             logger.error(f"Failed to list Railway volumes: {e}")

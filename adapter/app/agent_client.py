@@ -5,7 +5,10 @@ from app.config import get_settings
 
 logger = structlog.get_logger()
 
-# In-memory mapping of user_id -> context_id for multi-turn conversations
+# In-memory mapping of user_id -> context_id for multi-turn conversations.
+# WARNING: This is process-local state. With multiple uvicorn workers or
+# replicas, conversations that hit different processes will lose context.
+# TODO: Replace with a shared store (Redis, DB) for production multi-replica deployments.
 _context_map: dict[str, str] = {}
 
 

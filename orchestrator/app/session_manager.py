@@ -1,5 +1,6 @@
 """Session manager for handling Railway service lifecycle and user sessions."""
 import asyncio
+import weakref
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,7 +10,7 @@ import structlog
 from app.models import User, UserStatus
 from app.railway import RailwayClient, get_railway_client
 from app.config import get_settings
-from app.database import init_db, _session_factory
+from app.database import create_session
 
 logger = structlog.get_logger()
 
@@ -19,14 +20,18 @@ class SessionManager:
 
     def __init__(self):
         self._active_sessions: Dict[str, datetime] = {}  # user_id -> last_activity
-        self._spin_locks: Dict[str, asyncio.Lock] = {}  # user_id -> lock
+        # WeakValueDictionary: locks are GC'd automatically when no coroutine holds
+        # a strong reference, eliminating the remove-then-recreate race condition.
+        self._spin_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = (
+            weakref.WeakValueDictionary()
+        )
         self._cleanup_task: Optional[asyncio.Task] = None
 
     async def start_cleanup_task(self) -> None:
         """Start the background cleanup task for idle sessions."""
         if self._cleanup_task is None:
             self._cleanup_task = asyncio.create_task(self._cleanup_idle_sessions())
-            logger.info("Session manager cleanup task started")
+            logger.info("session_cleanup_task_started")
 
     async def stop_cleanup_task(self) -> None:
         """Stop the background cleanup task."""
@@ -37,18 +42,21 @@ class SessionManager:
             except asyncio.CancelledError:
                 pass
             self._cleanup_task = None
-            logger.info("Session manager cleanup task stopped")
+            logger.info("session_cleanup_task_stopped")
 
     def _get_lock(self, user_id: str) -> asyncio.Lock:
-        """Get or create a lock for a user's session operations."""
-        if user_id not in self._spin_locks:
-            self._spin_locks[user_id] = asyncio.Lock()
-        return self._spin_locks[user_id]
+        """Get or create a lock for a user's session operations.
 
-    def _remove_lock(self, user_id: str) -> None:
-        """Remove a user's lock when no longer needed."""
-        if user_id in self._spin_locks:
-            del self._spin_locks[user_id]
+        Returns the existing lock if one is alive, otherwise creates a new one.
+        The caller MUST hold a strong reference to the returned lock for the
+        duration of the critical section — WeakValueDictionary only keeps a
+        weak reference, so the lock will be GC'd when there are no other refs.
+        """
+        lock = self._spin_locks.get(user_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._spin_locks[user_id] = lock
+        return lock
 
     async def ensure_user_service(
         self,
@@ -81,7 +89,11 @@ class SessionManager:
 
                 # Check if user already has a service
                 if user.railway_service_id:
-                    logger.info("user_already_has_service", user_id=user_id, service_id=user.railway_service_id)
+                    logger.info(
+                        "user_already_has_service",
+                        user_id=user_id,
+                        service_id=user.railway_service_id,
+                    )
                     return False, None
 
                 # Spin up new service
@@ -103,13 +115,16 @@ class SessionManager:
     ) -> None:
         """Spin up a Railway service for a user.
 
+        Creates a volume, creates a service, mounts the volume to the service,
+        then triggers a deployment with the user's environment variables.
+
         Args:
             db: Database session
             user: User object
             user_id: User ID
 
         Raises:
-            Exception: If service creation fails
+            Exception: If any step of service creation fails (with cleanup on error)
         """
         settings = get_settings()
         railway_client = await get_railway_client()
@@ -118,7 +133,7 @@ class SessionManager:
         created_service_id = None
 
         try:
-            # Create volume for persistent storage
+            # Step 1: Create volume for persistent storage
             volume_name = f"user-{user_id}-volume"
             volume_response = await railway_client.create_volume(
                 name=volume_name,
@@ -127,61 +142,83 @@ class SessionManager:
             )
             volume_id = volume_response["id"]
             created_volume_id = volume_id
-            logger.info(f"Created volume {volume_id} for user {user_id}")
+            logger.info("volume_created", volume_id=volume_id, user_id=user_id)
 
-            # Create service
+            # Step 2: Create service
             service_name = f"user-{user_id}-service"
             service_response = await railway_client.create_service(
                 name=service_name,
                 docker_image=settings.agent_docker_image,
                 memory=settings.agent_default_memory,
                 cpu=settings.agent_default_cpu,
-                volume_id=volume_id,
             )
             service_id = service_response["id"]
             created_service_id = service_id
-            logger.info(f"Created service {service_id} for user {user_id}")
+            logger.info("service_created", service_id=service_id, user_id=user_id)
 
-            # Create deployment with environment variables
+            # Step 3: Mount volume to service (previously missing!)
+            await railway_client.mount_volume_to_service(
+                volume_id=volume_id,
+                service_id=service_id,
+                mount_path=settings.volume_mount_path,
+            )
+            logger.info(
+                "volume_mounted_to_service",
+                volume_id=volume_id,
+                service_id=service_id,
+                user_id=user_id,
+            )
+
+            # Step 4: Deploy with environment variables
             env_vars = {
                 "USER_ID": user_id,
                 "API_KEY": user.api_key,
                 "DISPLAY_NAME": user.display_name,
             }
-
             deployment_response = await railway_client.create_deployment(
                 service_id=service_id,
                 docker_image=settings.agent_docker_image,
                 env_vars=env_vars,
             )
             deployment_id = deployment_response["id"]
-            logger.info(f"Created deployment {deployment_id} for service {service_id}")
+            logger.info(
+                "deployment_created",
+                deployment_id=deployment_id,
+                service_id=service_id,
+                user_id=user_id,
+            )
 
-            # Update user with service and volume IDs
+            # Step 5: Persist IDs — ORM onupdate handles updated_at automatically
             user.railway_service_id = service_id
             user.volume_id = volume_id
             user.status = UserStatus.ACTIVE
-            user.updated_at = datetime.now(timezone.utc)
 
-            logger.info(f"Successfully spun up service {service_id} for user {user_id}")
+            logger.info("service_spinup_complete", service_id=service_id, user_id=user_id)
 
         except Exception as e:
-            logger.error(f"Failed to spin up service for user {user_id}: {e}")
-            # Cleanup any partially created resources
+            logger.error("service_spinup_failed", user_id=user_id, error=str(e))
+            # Best-effort cleanup of partially created resources
             if created_service_id:
                 try:
                     await railway_client.delete_service(created_service_id)
-                    logger.info(f"Cleaned up service {created_service_id}")
-                except Exception as cleanup_error:
-                    logger.error(f"Failed to cleanup service {created_service_id}: {cleanup_error}")
+                    logger.info("cleanup_service_deleted", service_id=created_service_id)
+                except Exception as cleanup_err:
+                    logger.error(
+                        "cleanup_service_failed",
+                        service_id=created_service_id,
+                        error=str(cleanup_err),
+                    )
 
             if created_volume_id:
                 try:
                     await railway_client.delete_volume(created_volume_id)
-                    logger.info(f"Cleaned up volume {created_volume_id}")
-                except Exception as cleanup_error:
-                    logger.error(f"Failed to cleanup volume {created_volume_id}: {cleanup_error}")
-
+                    logger.info("cleanup_volume_deleted", volume_id=created_volume_id)
+                except Exception as cleanup_err:
+                    logger.error(
+                        "cleanup_volume_failed",
+                        volume_id=created_volume_id,
+                        error=str(cleanup_err),
+                    )
             raise
 
     async def spin_down_user_service(
@@ -202,32 +239,29 @@ class SessionManager:
 
         async with lock:
             try:
-                # Get user from database
                 result = await db.execute(select(User).where(User.id == user_id))
                 user = result.scalar_one_or_none()
 
                 if not user:
-                    logger.error(f"User not found: {user_id}")
+                    logger.error("spin_down_user_not_found", user_id=user_id)
                     return False
 
                 if not user.railway_service_id:
-                    logger.info(f"User {user_id} has no service to spin down")
+                    logger.info("spin_down_no_service", user_id=user_id)
                     return False
 
                 await self._spin_down_service(db, user, user_id)
                 await db.commit()
 
-                # Remove from active sessions
                 if user_id in self._active_sessions:
                     del self._active_sessions[user_id]
 
                 return True
 
             except Exception as e:
-                logger.error(f"Error spinning down service for {user_id}: {e}")
+                logger.error("spin_down_error", user_id=user_id, error=str(e))
                 raise
-            finally:
-                self._remove_lock(user_id)
+            # No finally/_remove_lock: WeakValueDictionary handles cleanup automatically
 
     async def _spin_down_service(
         self,
@@ -235,7 +269,7 @@ class SessionManager:
         user: User,
         user_id: str,
     ) -> None:
-        """Spin down a Railway service for a user.
+        """Tear down the Railway service and volume for a user.
 
         Args:
             db: Database session
@@ -251,26 +285,23 @@ class SessionManager:
             service_id = user.railway_service_id
             volume_id = user.volume_id
 
-            # Delete service
             if service_id:
-                logger.info(f"Deleting service {service_id} for user {user_id}")
+                logger.info("deleting_service", service_id=service_id, user_id=user_id)
                 await railway_client.delete_service(service_id)
 
-            # Delete volume (optionally - for now we delete it)
             if volume_id:
-                logger.info(f"Deleting volume {volume_id} for user {user_id}")
+                logger.info("deleting_volume", volume_id=volume_id, user_id=user_id)
                 await railway_client.delete_volume(volume_id)
 
-            # Update user record
+            # ORM onupdate handles updated_at automatically
             user.railway_service_id = None
             user.volume_id = None
             user.status = UserStatus.PENDING
-            user.updated_at = datetime.now(timezone.utc)
 
-            logger.info(f"Successfully spun down service for user {user_id}")
+            logger.info("service_spindown_complete", user_id=user_id)
 
         except Exception as e:
-            logger.error(f"Failed to spin down service for user {user_id}: {e}")
+            logger.error("service_spindown_failed", user_id=user_id, error=str(e))
             raise
 
     async def record_activity(self, user_id: str) -> None:
@@ -305,29 +336,65 @@ class SessionManager:
 
         try:
             service = await railway_client.get_service(user.railway_service_id)
+            
+            # Extract service URL from domains or generate from Railway app URL
+            service_url = None
+            domains = service.get("domains", [])
+            if domains:
+                service_url = f"https://{domains[0].get('domain', '')}"
+            elif service.get("name"):
+                # Fallback to Railway app URL pattern
+                service_url = f"https://{service['name']}.up.railway.app"
+            
             return {
                 "service_id": user.railway_service_id,
                 "volume_id": user.volume_id,
                 "status": service.get("status"),
                 "updated_at": service.get("updatedAt"),
                 "instances": service.get("serviceInstances", []),
+                "service_url": service_url,
             }
         except Exception as e:
-            logger.error(f"Error getting service status for {user_id}: {e}")
+            logger.error("get_service_status_error", user_id=user_id, error=str(e))
             return None
 
     async def _get_db_session(self) -> AsyncSession:
         """Create and return a new async database session.
 
-        This method is used by the cleanup task which operates independently
-        of request lifecycle and cannot receive injected sessions.
+        Used by the cleanup task which operates independently of request
+        lifecycle. Delegates to database.create_session().
+        """
+        return create_session()
+
+    async def provision_user_background(self, user_id: str) -> bool:
+        """Provision a Railway service for a newly registered user.
+
+        Designed to run as a fire-and-forget background task from the Clerk
+        webhook handler so the webhook response returns immediately. Creates
+        its own database session (independent of the webhook request lifecycle).
+
+        Idempotent: safe to call even if the user already has a service.
+
+        Args:
+            user_id: Platform user ID to provision a service for.
 
         Returns:
-            A new AsyncSession instance
+            True if a new service was provisioned, False if already existed.
         """
-        if _session_factory is None:
-            init_db()
-        return _session_factory()
+        db = create_session()
+        try:
+            was_created, _ = await self.ensure_user_service(db, user_id)
+            logger.info(
+                "background_provision_complete",
+                user_id=user_id,
+                was_created=was_created,
+            )
+            return was_created
+        except Exception as e:
+            logger.error("background_provision_failed", user_id=user_id, error=str(e))
+            return False
+        finally:
+            await db.close()
 
     async def spin_down_idle_user(self, user_id: str) -> bool:
         """Spin down an idle user's Railway service.
@@ -343,17 +410,15 @@ class SessionManager:
         """
         db = await self._get_db_session()
         try:
-            # Get user from database
             result = await db.execute(select(User).where(User.id == user_id))
             user = result.scalar_one_or_none()
 
             if not user:
-                logger.error(f"User not found during idle cleanup: {user_id}")
+                logger.error("idle_cleanup_user_not_found", user_id=user_id)
                 return False
 
             if not user.railway_service_id:
-                logger.info(f"User {user_id} has no service to spin down during idle cleanup")
-                # Still remove from active sessions since they have no service
+                logger.info("idle_cleanup_no_service", user_id=user_id)
                 if user_id in self._active_sessions:
                     del self._active_sessions[user_id]
                 return False
@@ -361,15 +426,14 @@ class SessionManager:
             await self._spin_down_service(db, user, user_id)
             await db.commit()
 
-            # Remove from active sessions
             if user_id in self._active_sessions:
                 del self._active_sessions[user_id]
 
-            logger.info(f"Successfully spun down idle user {user_id}")
+            logger.info("idle_user_spun_down", user_id=user_id)
             return True
 
         except Exception as e:
-            logger.error(f"Error spinning down idle user {user_id}: {e}")
+            logger.error("idle_spindown_error", user_id=user_id, error=str(e))
             return False
         finally:
             await db.close()
@@ -384,36 +448,28 @@ class SessionManager:
                 await asyncio.sleep(60)  # Check every minute
 
                 current_time = datetime.now(timezone.utc)
-                idle_users = []
+                idle_users = [
+                    uid
+                    for uid, last_activity in list(self._active_sessions.items())
+                    if (current_time - last_activity) > idle_timeout
+                ]
 
-                # Find idle users
-                for user_id, last_activity in list(self._active_sessions.items()):
-                    idle_time = current_time - last_activity
-                    if idle_time > idle_timeout:
-                        idle_users.append(user_id)
-
-                # Spin down services for idle users
                 for user_id in idle_users:
                     try:
-                        logger.info(f"User {user_id} idle, spinning down service")
+                        logger.info("user_idle_spinning_down", user_id=user_id)
                         await self.spin_down_idle_user(user_id)
                     except Exception as e:
-                        # Log error but continue processing other users
-                        logger.error(f"Failed to spin down idle user {user_id}: {e}")
+                        logger.error("idle_spindown_loop_error", user_id=user_id, error=str(e))
 
             except asyncio.CancelledError:
-                logger.info("Cleanup task cancelled")
+                logger.info("session_cleanup_task_cancelled")
                 break
             except Exception as e:
-                logger.error(f"Error in cleanup task: {e}")
-                await asyncio.sleep(60)  # Wait before retrying
+                logger.error("session_cleanup_loop_error", error=str(e))
+                await asyncio.sleep(60)  # Back off before retrying
 
     async def get_active_session_count(self) -> int:
-        """Get the number of currently active sessions.
-
-        Returns:
-            Number of active sessions
-        """
+        """Get the number of currently active sessions."""
         return len(self._active_sessions)
 
     async def get_session_info(self, user_id: str) -> Optional[Dict]:

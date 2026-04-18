@@ -1,4 +1,17 @@
-"""Rate limiting utilities for the orchestrator."""
+"""Rate limiting utilities for the orchestrator.
+
+Storage backend is configured via ``RATE_LIMIT_STORAGE_URI`` in settings:
+
+  memory://        In-process storage — resets on restart, not shared across
+                   replicas.  Safe default for development and tests.
+
+  redis://host/db  Redis-backed storage — survives restarts and is shared
+                   across all replicas.  Use this in production.
+
+Example Railway production env::
+
+    RATE_LIMIT_STORAGE_URI=redis://redis:6379/0
+"""
 import re
 from fastapi import Request
 from fastapi.responses import JSONResponse
@@ -6,43 +19,52 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
+from app.config import get_settings
+
 
 def _get_user_id_or_ip(request: Request) -> str:
-    """Get user ID for rate limiting, fall back to IP address.
+    """Return a per-user rate-limit key, falling back to IP.
 
-    Used for authenticated routes where we want per-user rate limiting.
+    Precedence:
+    1. ``request.state.user_id`` — set by auth middleware for authenticated reqs
+    2. First 16 chars of the Bearer token — identifies API-key callers
+    3. Client IP address — unauthenticated fallback
     """
-    # Try to get user ID from request state (set by auth middleware)
     user_id = getattr(request.state, "user_id", None)
     if user_id:
         return f"user:{user_id}"
 
-    # Fall back to Authorization header API key for identification
     auth_header = request.headers.get("Authorization", "")
     if auth_header.startswith("Bearer "):
-        # Use a hash of the token to avoid logging raw tokens
         token = auth_header[7:]
-        return f"token:{token[:16]}"  # Use first 16 chars as identifier
+        return f"token:{token[:16]}"
 
-    # Final fallback to IP address
     return get_remote_address(request)
 
 
-# Rate limiter instance - uses remote IP as default key
-limiter = Limiter(key_func=get_remote_address)
+def _make_limiter(storage_uri: str) -> Limiter:
+    """Create a :class:`~slowapi.Limiter` bound to *storage_uri*.
+
+    Extracted into a factory so tests can instantiate a fresh limiter with
+    ``memory://`` without mutating the module-level singleton.
+    """
+    return Limiter(key_func=get_remote_address, storage_uri=storage_uri)
+
+
+# Module-level singleton consumed by all ``@limiter.limit(...)`` decorators.
+# storage_uri is read once at import time from settings (lru_cache'd).
+limiter: Limiter = _make_limiter(get_settings().rate_limit_storage_uri)
 
 
 def rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded) -> JSONResponse:
-    """Custom rate limit exceeded handler that includes Retry-After header."""
-    response = JSONResponse(
-        status_code=429,
-        content={"detail": "Rate limit exceeded. Please try again later."},
-    )
-    # Default to 60 seconds for safety
+    """Return a 429 JSON response with a ``Retry-After`` header.
+
+    Parses the limit string from *exc* (e.g. ``"60 per 1 minute"``) to derive
+    a sensible ``Retry-After`` value.  Defaults to 60 seconds when parsing
+    fails.
+    """
     retry_after = 60
     if hasattr(exc, "detail") and exc.detail:
-        # Try to extract the retry time from the limit string
-        # Format is like "60 per 1 minute" or "30 per 1 minute"
         match = re.search(r"per\s+(\d+)\s+(minute|second|hour)", str(exc.detail))
         if match:
             amount = int(match.group(1))
@@ -53,5 +75,10 @@ def rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded) -> JSO
                 retry_after = amount * 60
             elif unit == "hour":
                 retry_after = amount * 3600
+
+    response = JSONResponse(
+        status_code=429,
+        content={"detail": "Rate limit exceeded. Please try again later."},
+    )
     response.headers["Retry-After"] = str(retry_after)
     return response

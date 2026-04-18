@@ -2,6 +2,7 @@
 from pydantic_settings import BaseSettings
 from functools import lru_cache
 
+
 class Settings(BaseSettings):
     # Railway
     railway_api_token: str = ""
@@ -14,6 +15,12 @@ class Settings(BaseSettings):
 
     # Redis
     redis_url: str = "redis://localhost:6379/0"
+
+    # Rate limiting — limits-library URI format.
+    # memory://   in-process; resets on restart, not shared across replicas (dev/test default)
+    # redis://... persists across restarts AND is shared across all replicas (production)
+    # Production: set RATE_LIMIT_STORAGE_URI=redis://redis:6379/0
+    rate_limit_storage_uri: str = "memory://"
 
     # Admin
     admin_agent_api_key: str = ""
@@ -36,12 +43,14 @@ class Settings(BaseSettings):
     # Clerk Authentication
     clerk_secret_key: str = ""
     clerk_publishable_key: str = ""
+    clerk_frontend_api_url: str = ""  # e.g. https://xxx.clerk.accounts.dev
     clerk_webhook_secret: str = ""
-    clerk_jwt_public_key: str = ""  # Optional, can be fetched from API
+    clerk_jwt_public_key: str = ""  # Optional; fetched from JWKS endpoint if absent
+    clerk_jwt_issuer: str = ""      # e.g. https://xxx.clerk.accounts.dev -- enables iss verification
     clerk_authorized_origins: str = ""  # Comma-separated list of authorized origins
 
     # CORS
-    cors_allowed_origins: str = "http://localhost:3000"  # Comma-separated list of allowed origins
+    cors_allowed_origins: str = ""  # Comma-separated. REQUIRED in production.
 
     # Scheduler
     health_check_interval_minutes: int = 5
@@ -51,9 +60,11 @@ class Settings(BaseSettings):
     db_health_check_interval_minutes: int = 10
 
     # Deployment
-    auto_create_tables: bool = True  # Set false in production to use Alembic migrations instead
+    # Set to False in production to rely on Alembic migrations instead of auto-create.
+    auto_create_tables: bool = True
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+
 
 @lru_cache
 def get_settings() -> Settings:

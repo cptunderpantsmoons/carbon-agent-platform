@@ -817,3 +817,172 @@ async def test_scheduler_concurrent_start_stop(scheduler):
 
                     # Scheduler should end up stopped
                     assert scheduler.is_running() is False
+
+
+# ─── Audit Log Cleanup — Real-SQL Integration Tests ──────────────────────────
+#
+# These tests patch app.database._session_factory to point at the shared
+# in-memory SQLite engine, then call _cleanup_old_audit_logs() for real so
+# the actual DELETE SQL is exercised (not just the mock path).
+
+
+class TestAuditCleanupIntegration:
+    """Drive _cleanup_old_audit_logs against a live SQLite session."""
+
+    @staticmethod
+    async def _seed(factory, *, old_plain_id, old_critical_id, recent_id):
+        """Insert three AuditLog rows with carefully chosen created_at values."""
+        from datetime import datetime, timezone, timedelta
+
+        async with factory() as s:
+            s.add(AuditLog(
+                id=old_plain_id,
+                user_id=None,
+                action="user.logged_in",          # non-critical, old → must be deleted
+                details={"info": "seed"},
+                performed_by="test",
+                created_at=datetime.now(timezone.utc) - timedelta(days=100),
+            ))
+            s.add(AuditLog(
+                id=old_critical_id,
+                user_id=None,
+                action="user_deleted",             # critical, old → must be preserved
+                details={"info": "seed"},
+                performed_by="admin",
+                created_at=datetime.now(timezone.utc) - timedelta(days=100),
+            ))
+            s.add(AuditLog(
+                id=recent_id,
+                user_id=None,
+                action="user.logged_in",           # non-critical, recent → must be preserved
+                details={"info": "seed"},
+                performed_by="test",
+                created_at=datetime.now(timezone.utc) - timedelta(days=1),
+            ))
+            await s.commit()
+
+    @pytest.mark.asyncio
+    async def test_old_non_critical_logs_are_deleted(self, engine, scheduler):
+        """DELETE removes old non-critical rows and leaves everything else."""
+        import app.database as db_module
+        from sqlalchemy.ext.asyncio import async_sessionmaker
+        from sqlalchemy import select as sa_select
+
+        factory = async_sessionmaker(engine, expire_on_commit=False)
+        old_factory = db_module._session_factory
+        db_module._session_factory = factory
+
+        try:
+            await self._seed(factory,
+                old_plain_id="integ-old-plain",
+                old_critical_id="integ-old-critical",
+                recent_id="integ-recent")
+
+            with patch("app.scheduler.get_settings") as ms:
+                ms.return_value.audit_retention_days = 90
+                results = await scheduler._cleanup_old_audit_logs()
+
+            # Structural assertions on the returned summary dict
+            assert results["deleted_count"] >= 1, "expected at least one deletion"
+            assert results["preserved_count"] >= 1, "expected at least one preserved critical row"
+            assert "cutoff_date" in results
+            assert "timestamp" in results
+
+            # Verify actual DB state
+            async with factory() as s:
+                rows = (await s.execute(sa_select(AuditLog))).scalars().all()
+                ids = {r.id for r in rows}
+
+            assert "integ-old-plain" not in ids,    "old non-critical row should be deleted"
+            assert "integ-old-critical" in ids,     "old critical row must be preserved"
+            assert "integ-recent" in ids,           "recent row must not be touched"
+        finally:
+            db_module._session_factory = old_factory
+
+    @pytest.mark.asyncio
+    async def test_deleted_count_is_non_negative(self, engine, scheduler):
+        """deleted_count must always be >= 0 even if the DB returns rowcount=-1."""
+        import app.database as db_module
+        from sqlalchemy.ext.asyncio import async_sessionmaker
+
+        factory = async_sessionmaker(engine, expire_on_commit=False)
+        old_factory = db_module._session_factory
+        db_module._session_factory = factory
+
+        try:
+            # Empty table — rowcount will be 0 (or -1 on some aiosqlite builds)
+            with patch("app.scheduler.get_settings") as ms:
+                ms.return_value.audit_retention_days = 90
+                results = await scheduler._cleanup_old_audit_logs()
+
+            assert results["deleted_count"] >= 0, "deleted_count must never be negative"
+        finally:
+            db_module._session_factory = old_factory
+
+    @pytest.mark.asyncio
+    async def test_cleanup_self_log_is_written(self, engine, scheduler):
+        """_cleanup_old_audit_logs must commit an audit_log_cleanup entry."""
+        import app.database as db_module
+        from sqlalchemy.ext.asyncio import async_sessionmaker
+        from sqlalchemy import select as sa_select
+
+        factory = async_sessionmaker(engine, expire_on_commit=False)
+        old_factory = db_module._session_factory
+        db_module._session_factory = factory
+
+        try:
+            with patch("app.scheduler.get_settings") as ms:
+                ms.return_value.audit_retention_days = 90
+                await scheduler._cleanup_old_audit_logs()
+
+            async with factory() as s:
+                rows = (await s.execute(
+                    sa_select(AuditLog).where(AuditLog.action == "audit_log_cleanup")
+                )).scalars().all()
+
+            assert len(rows) >= 1, "cleanup must write an audit_log_cleanup entry"
+            assert rows[0].performed_by == "scheduler"
+        finally:
+            db_module._session_factory = old_factory
+
+    @pytest.mark.asyncio
+    async def test_recent_logs_are_untouched(self, engine, scheduler):
+        """Rows newer than the retention window must not be deleted."""
+        import app.database as db_module
+        from sqlalchemy.ext.asyncio import async_sessionmaker
+        from sqlalchemy import select as sa_select
+        from datetime import datetime, timezone, timedelta
+
+        factory = async_sessionmaker(engine, expire_on_commit=False)
+        old_factory = db_module._session_factory
+        db_module._session_factory = factory
+
+        try:
+            async with factory() as s:
+                for i in range(5):
+                    s.add(AuditLog(
+                        id=f"recent-{i}",
+                        user_id=None,
+                        action="user.logged_in",
+                        details={},
+                        performed_by="test",
+                        created_at=datetime.now(timezone.utc) - timedelta(hours=i),
+                    ))
+                await s.commit()
+
+            with patch("app.scheduler.get_settings") as ms:
+                ms.return_value.audit_retention_days = 90
+                results = await scheduler._cleanup_old_audit_logs()
+
+            assert results["deleted_count"] == 0
+
+            async with factory() as s:
+                from sqlalchemy import func as sqla_func
+                count = (await s.execute(
+                    sa_select(sqla_func.count(AuditLog.id)).where(
+                        AuditLog.id.like("recent-%")
+                    )
+                )).scalar()
+            assert count == 5, "none of the fresh logs should have been deleted"
+        finally:
+            db_module._session_factory = old_factory
