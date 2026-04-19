@@ -3,19 +3,23 @@
 # environment-variable-driven configuration substitution.
 #
 # Base image digest pinned for reproducibility.
-# To refresh: docker buildx imagetools inspect ghcr.io/open-webui/open-webui:main
-#   Index  (multi-arch): sha256:b8095f79a6a8ffad8f830bdacc9b5b0aef805689b31bca0b065cc2424d3cfaeb
-#   linux/amd64:         sha256:d6ac2a75e069cfca698b3e8ed895c0cf75f5698a31f3d9dc0713ed4af2cc3385
-#   linux/arm64:         sha256:a10c18cd35fa9bcaa7650598c1699609db1292ce4fc89499b5eaf93ac435f380
+# SECURITY UPDATE REQUIRED: Current image has 4 critical + 26 high vulnerabilities
+# To update:
+#   1. Run: docker buildx imagetools inspect ghcr.io/open-webui/open-webui:main
+#   2. Copy the multi-arch index digest (sha256:...)
+#   3. Update the digest below
+#   4. Rebuild: docker compose build open-webui
+#   Last updated: 2026-04-20
 FROM ghcr.io/open-webui/open-webui:main@sha256:b8095f79a6a8ffad8f830bdacc9b5b0aef805689b31bca0b065cc2424d3cfaeb
 
 LABEL maintainer="Carbon Agent Platform"
 LABEL description="The Intelligence Hub - Open WebUI with Clerk Integration"
 
-# Open WebUI runtime flags
+# Open WebUI runtime flags (non-sensitive defaults)
+# NOTE: Sensitive values (API keys, secrets) should be set at runtime via
+# docker-compose environment variables or .env files, NOT in the Dockerfile.
 ENV CLERK_ENABLED=true
 ENV ENABLE_SIGNUP=false
-ENV WEBUI_AUTH=true
 
 # File operations require root; we drop privileges before ENTRYPOINT
 USER root

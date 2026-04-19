@@ -16,6 +16,7 @@ from app.config import get_settings
 from app.auth import verify_api_key, get_db
 from app.models import User
 from app.metrics import RequestIDMiddleware, metrics_endpoint
+from app.mcp_client import get_mcp_client, MCPError, MCPClient
 
 logger = structlog.get_logger()
 app = FastAPI(title="Carbon Agent OpenAI Adapter", version="2.0.0")
@@ -36,6 +37,187 @@ def _get_agent_base_url(user: User, settings) -> str:
     if agent_domain and user.id:
         return f"https://{agent_domain}/agent/{user.id}"
     return settings.agent_api_url
+
+
+async def _try_mcp_tool_enhancement(
+    user_message: str,
+    user_id: str,
+) -> str:
+    """Attempt to enhance message with MCP tool results.
+
+    If MCP is enabled and the message appears to require tool use,
+    this function discovers and calls appropriate tools, then augments
+    the message with tool results for Agent Zero to use.
+
+    If MCP is disabled or unavailable, returns the original message unchanged.
+
+    Args:
+        user_message: The user's original message.
+        user_id: The authenticated user's ID.
+
+    Returns:
+        Original message or augmented message with tool results.
+    """
+    mcp = get_mcp_client()
+
+    # Early exit if MCP is disabled
+    if not mcp.enabled:
+        return user_message
+
+    # Tool detection keywords (expand based on your use case)
+    tool_keywords = [
+        "search", "find", "look up", "research", "browse",
+        "execute code", "run code", "python",
+        "navigate", "open url", "website",
+        "analyze", "process", "extract"
+    ]
+
+    # Check if message likely needs tool use
+    message_lower = user_message.lower()
+    needs_tool = any(keyword in message_lower for keyword in tool_keywords)
+
+    if not needs_tool:
+        return user_message
+
+    try:
+        # Discover available tools
+        tools = await mcp.list_tools()
+
+        if not tools:
+            logger.info("mcp_no_tools_available", user_id=user_id)
+            return user_message
+
+        # Select appropriate tool based on message content
+        selected_tool = _select_tool_for_message(tools, message_lower)
+
+        if selected_tool is None:
+            return user_message
+
+        # Execute the tool
+        logger.info(
+            "mcp_tool_execution_start",
+            tool=selected_tool.name,
+            user_id=user_id,
+        )
+
+        tool_params = _extract_tool_params(selected_tool, user_message)
+        result = await mcp.call_tool(
+            selected_tool.name,
+            tool_params,
+            user_id=user_id
+        )
+
+        if result.get("success"):
+            # Augment message with tool results
+            tool_result = result.get("result", "")
+            augmented_message = (
+                f"{user_message}\n\n"
+                f"[Tool: {selected_tool.name}]\n"
+                f"Results: {tool_result}"
+            )
+            logger.info(
+                "mcp_tool_augmentation_success",
+                tool=selected_tool.name,
+                user_id=user_id,
+            )
+            return augmented_message
+        else:
+            logger.warning(
+                "mcp_tool_execution_failed",
+                tool=selected_tool.name,
+                user_id=user_id,
+                error=result.get("error", "unknown"),
+            )
+            return user_message
+
+    except MCPError as e:
+        # Graceful degradation — continue without tool results
+        logger.warning(
+            "mcp_tool_error_fallback",
+            user_id=user_id,
+            error=str(e),
+        )
+        return user_message
+    except Exception as e:
+        # Catch-all for unexpected errors
+        logger.error(
+            "mcp_unexpected_error",
+            user_id=user_id,
+            error=str(e),
+        )
+        return user_message
+
+
+def _select_tool_for_message(
+    tools: list,
+    message_lower: str,
+) -> object | None:
+    """Select the most appropriate tool for the given message.
+
+    Args:
+        tools: List of available MCPTool objects.
+        message_lower: Lowercased user message.
+
+    Returns:
+        Best matching tool or None if no match.
+    """
+    # Simple keyword-based tool selection
+    # Can be enhanced with LLM-based tool selection in the future
+    tool_selection_rules = {
+        "search": ["search", "find", "look up", "research"],
+        "browser": ["browse", "navigate", "open url", "website"],
+        "code": ["execute code", "run code", "python", "script"],
+    }
+
+    for tool in tools:
+        tool_name_lower = tool.name.lower()
+
+        # Direct name match
+        if tool_name_lower in message_lower:
+            return tool
+
+        # Keyword-based match
+        for keyword_category, keywords in tool_selection_rules.items():
+            if keyword_category in tool_name_lower:
+                if any(kw in message_lower for kw in keywords):
+                    return tool
+
+    return None
+
+
+def _extract_tool_params(
+    tool: object,
+    message: str,
+) -> dict:
+    """Extract parameters for the selected tool from the user message.
+
+    This is a simple implementation — can be enhanced with regex or LLM extraction.
+
+    Args:
+        tool: The selected MCPTool object.
+        message: The user's message.
+
+    Returns:
+        Dictionary of parameters for the tool.
+    """
+    # Default parameter extraction
+    # For search tools, use the entire message as the query
+    if "search" in tool.name.lower():
+        return {"query": message, "max_results": 5}
+
+    if "browser" in tool.name.lower():
+        # Try to extract URL from message
+        import re
+        url_match = re.search(r'https?://\S+', message)
+        if url_match:
+            return {"url": url_match.group(0)}
+        return {"query": message}
+
+    if "code" in tool.name.lower():
+        return {"code": message}
+
+    # Fallback: pass the entire message as a generic parameter
+    return {"input": message}
 
 
 @app.get("/health")
@@ -67,12 +249,14 @@ async def list_models(user: User = Depends(verify_api_key)):
 async def chat_completions(
     request: ChatCompletionRequest,
     user: User = Depends(verify_api_key),
-    db: AsyncSession = Depends(get_db),
 ):
     """OpenAI-compatible chat completions endpoint.
 
     Routes requests to user's specific Docker container and
     fakes SSE streaming if client requested it.
+
+    If MCP is enabled, attempts to enhance the message with tool results
+    before sending to Agent Zero.
     """
     settings = get_settings()
 
@@ -87,6 +271,14 @@ async def chat_completions(
         raise HTTPException(status_code=400, detail="No user message found")
 
     logger.info("chat_request", user_id=user.id, user_email=user.email, stream=request.stream)
+
+    # MCP tool enhancement (optional, fails gracefully)
+    if settings.mcp_enabled:
+        try:
+            user_message = await _try_mcp_tool_enhancement(user_message, user.id)
+        except Exception as e:
+            logger.error("mcp_enhancement_failed", user_id=user.id, error=str(e))
+            # Continue without MCP enhancement
 
     # Route to user's dedicated Docker container or fallback to shared endpoint
     base_url = _get_agent_base_url(user, settings)

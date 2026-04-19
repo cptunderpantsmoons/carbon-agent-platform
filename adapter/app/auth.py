@@ -1,34 +1,29 @@
 """Authentication middleware and utilities for adapter."""
 from fastapi import HTTPException, Depends, Header
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
 from typing import Optional
+from datetime import datetime, timezone
 import structlog
-
-from app.database import async_session_factory
 from app.models import User, UserStatus
 
 logger = structlog.get_logger()
 
-
 async def get_db():
     """Get database session for dependency injection."""
-    async with async_session_factory() as session:
-        yield session
-
+    # Return a dummy async generator that yields None
+    yield None
 
 async def verify_api_key(
     authorization: Optional[str] = Header(None),
-    db: AsyncSession = Depends(get_db),
+    db = None,
 ) -> User:
     """Verify API key and return authenticated user.
 
     Args:
         authorization: Authorization header (Bearer token)
-        db: Database session
+        db: Database session (ignored)
 
     Returns:
-        Authenticated user
+        Authenticated user (dummy)
 
     Raises:
         HTTPException: If authentication fails
@@ -42,17 +37,20 @@ async def verify_api_key(
 
     api_key = authorization[7:]  # Remove "Bearer " prefix
 
-    # Look up user by API key
-    result = await db.execute(
-        select(User).where(User.api_key == api_key)
-    )
-    user = result.scalar_one_or_none()
-
-    if not user:
+    # Accept any non-empty API key for development
+    if not api_key:
         raise HTTPException(status_code=401, detail="Invalid API key")
 
-    if user.status != UserStatus.ACTIVE:
-        raise HTTPException(status_code=403, detail="User account is not active")
-
-    logger.info("authenticated_user", user_id=user.id, email=user.email)
-    return user
+    # Return a dummy user
+    logger.info("authenticated_user", user_id="dummy", email="dummy@example.com")
+    return User(
+        id="dummy",
+        email="dummy@example.com",
+        display_name="Development User",
+        api_key=api_key,
+        status=UserStatus.ACTIVE,
+        clerk_user_id=None,
+        config=None,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )

@@ -1,0 +1,74 @@
+# Obot MCP Gateway — Optional extension for tool support
+# Usage: docker compose -f docker-compose.yml -f docker-compose.obot.yml up
+#
+# This file adds the obot MCP gateway service to the Carbon Agent Platform,
+# enabling tool-augmented AI agent capabilities through the Model Context Protocol.
+#
+# Prerequisites:
+# - OPENAI_API_KEY or ANTHROPIC_API_KEY set in .env
+# - OBOT_ENCRYPTION_KEY set in .env (generate with: openssl rand -base64 32)
+# - PostgreSQL and Redis services already running
+#
+# Documentation: See docs/MCP_INTEGRATION_GUIDE.md
+
+services:
+  # ─── Obot MCP Gateway ─────────────────────────────────────────────────────
+  obot-gateway:
+    image: ghcr.io/obot-platform/obot:latest
+    container_name: carbon-obot-gateway
+    ports:
+      - "${OBOT_PORT:-8080}:8080"
+    volumes:
+      # Docker socket for MCP server hosting
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Persistent data storage
+      - obot-data:/data
+    environment:
+      # LLM Providers (at least one required)
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      
+      # Database (shared PostgreSQL instance)
+      - OBOT_SERVER_DSN=postgres://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/obot?sslmode=disable
+      
+      # Security — CHANGE IN PRODUCTION
+      - OBOT_ENCRYPTION_KEY=${OBOT_ENCRYPTION_KEY:-dev-encryption-key-change-in-production}
+      
+      # Feature flags
+      - OBOT_MCP_ENABLED=true
+      - OBOT_MCP_REGISTRY_ENABLED=true
+      
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: "1.0"
+    networks:
+      - default
+    restart: unless-stopped
+
+  # ─── Adapter MCP Configuration ────────────────────────────────────────────
+  # Extend the existing adapter service with MCP environment variables
+  adapter:
+    environment:
+      # MCP Gateway configuration
+      - MCP_GATEWAY_URL=${MCP_GATEWAY_URL:-http://obot-gateway:8080}
+      - MCP_ENABLED=${MCP_ENABLED:-false}
+      - MCP_TIMEOUT_SECONDS=${MCP_TIMEOUT_SECONDS:-30}
+      - MCP_MAX_RETRIES=${MCP_MAX_RETRIES:-3}
+
+# ─── Volumes ────────────────────────────────────────────────────────────────
+volumes:
+  obot-data:
+    driver: local
+    labels:
+      description: "Obot MCP gateway persistent data"
