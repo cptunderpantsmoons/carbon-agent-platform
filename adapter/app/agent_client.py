@@ -2,18 +2,17 @@
 import httpx
 import structlog
 from app.config import get_settings
+from app.context_store import get_context_store
 
 logger = structlog.get_logger()
 
-# In-memory mapping of user_id -> context_id for multi-turn conversations.
-# WARNING: This is process-local state. With multiple uvicorn workers or
-# replicas, conversations that hit different processes will lose context.
-# TODO: Replace with a shared store (Redis, DB) for production multi-replica deployments.
-_context_map: dict[str, str] = {}
-
 
 class AgentClient:
-    """Async client for the Agent Zero REST API."""
+    """Async client for the Agent Zero REST API.
+
+    Supports per-user context management through Redis-backed context store,
+    with automatic fallback to in-memory storage when Redis is unavailable.
+    """
 
     def __init__(self, base_url: str | None = None, api_key: str | None = None):
         settings = get_settings()
@@ -25,10 +24,25 @@ class AgentClient:
         }
 
     async def send_message(self, message: str, user_id: str | None = None) -> str:
-        """Send a message to Agent Zero and get the full response."""
+        """Send a message to Agent Zero and get the full response.
+
+        Uses the Redis-backed context store for multi-turn conversations.
+        Context IDs are persisted with a TTL matching the default_lifetime_hours
+        setting, and are shared across adapter replicas.
+
+        Args:
+            message: The user's message text.
+            user_id: Optional user ID for per-user context tracking.
+
+        Returns:
+            The agent's response text.
+        """
         settings = get_settings()
         effective_user_id = user_id or settings.user_id
-        context_id = _context_map.get(effective_user_id)
+
+        # Look up context_id from Redis-backed store
+        context_store = get_context_store()
+        context_id = await context_store.get(effective_user_id) if effective_user_id else None
 
         payload = {
             "message": message,
@@ -48,19 +62,33 @@ class AgentClient:
             response.raise_for_status()
             data = response.json()
 
-        # Persist context_id for multi-turn
+        # Persist context_id for multi-turn conversations
         returned_context_id = data.get("context_id")
         if returned_context_id and effective_user_id:
-            _context_map[effective_user_id] = returned_context_id
+            await context_store.set(effective_user_id, returned_context_id)
 
         return data.get("response", "")
 
     @staticmethod
-    def get_context_id(user_id: str) -> str | None:
-        """Get the stored context_id for a user."""
-        return _context_map.get(user_id)
+    async def get_context_id(user_id: str) -> str | None:
+        """Get the stored context_id for a user.
+
+        Args:
+            user_id: The user ID to look up.
+
+        Returns:
+            The context_id string, or None if not found.
+        """
+        store = get_context_store()
+        return await store.get(user_id)
 
     @staticmethod
-    def set_context_id(user_id: str, context_id: str) -> None:
-        """Manually set the context_id for a user."""
-        _context_map[user_id] = context_id
+    async def set_context_id(user_id: str, context_id: str) -> None:
+        """Manually set the context_id for a user.
+
+        Args:
+            user_id: The user ID to set context for.
+            context_id: The context_id to store.
+        """
+        store = get_context_store()
+        await store.set(user_id, context_id)

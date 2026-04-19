@@ -547,7 +547,7 @@ async function renderDashboard() {
     </div>
     <div class="card">
       <h2>Active Sessions</h2>
-      <table><thead><tr><th>Email</th><th>Name</th><th>Service ID</th><th>Volume ID</th><th>Last Updated</th><th>Actions</th></tr></thead>
+      <table><thead><tr><th>Email</th><th>Name</th><th>Status</th><th>Last Updated</th><th>Actions</th></tr></thead>
       <tbody id="sessions-table"></tbody></table>
     </div>`;
 
@@ -575,7 +575,7 @@ async function loadUsers() {
     const tbody = document.getElementById('users-table');
     tbody.innerHTML = users.map(u => `<tr>
       <td>${esc(u.email)}</td><td>${esc(u.display_name)}</td><td>${statusBadge(u.status)}</td>
-      <td>${u.railway_service_id ? 'Yes' : 'No'}</td>
+      <td>${u.status === 'active' ? 'Yes' : 'No'}</td>
       <td>${new Date(u.created_at).toLocaleDateString()}</td>
       <td class="actions">
         ${u.status === 'active' ? `<button class="btn" onclick="suspendUser(${JSON.stringify(u.id)})">Suspend</button>` : ''}
@@ -590,13 +590,12 @@ async function loadSessions() {
     const data = await api('/admin/sessions');
     const tbody = document.getElementById('sessions-table');
     if (!data.sessions || data.sessions.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--muted)">No active sessions</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--muted)">No active sessions</td></tr>';
       return;
     }
     tbody.innerHTML = data.sessions.map(s => `<tr>
       <td>${esc(s.email)}</td><td>${esc(s.display_name)}</td>
-      <td style="font-family:monospace;font-size:11px">${s.service_id || '-'}</td>
-      <td style="font-family:monospace;font-size:11px">${s.volume_id || '-'}</td>
+      <td>${s.status ? statusBadge(s.status) : '-'}</td>
       <td>${s.updated_at ? new Date(s.updated_at).toLocaleString() : '-'}</td>
       <td><button class="btn btn-danger" onclick="spinDownUser(${JSON.stringify(s.user_id)})">Spin Down</button></td>
     </tr>`).join('');

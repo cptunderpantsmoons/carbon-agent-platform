@@ -101,13 +101,13 @@ async def platform_health(
 ):
     """Get platform-wide health metrics."""
     total_users = await db.scalar(select(func.count(User.id)))
-    total_volumes = await db.scalar(
-        select(func.count(User.volume_id)).where(User.volume_id.isnot(None))
+    active_users = await db.scalar(
+        select(func.count(User.id)).where(User.status == UserStatus.ACTIVE)
     )
 
     return PlatformHealth(
         total_users=total_users or 0,
-        total_volumes=total_volumes or 0,
+        total_volumes=active_users or 0,
     )
 
 
@@ -212,8 +212,8 @@ async def delete_user(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    # Spin down Railway service before removing the DB record
-    if user.railway_service_id:
+    # Spin down Docker container before removing the DB record
+    if user.status == UserStatus.ACTIVE:
         try:
             session_manager = get_session_manager()
             await session_manager.spin_down_user_service(db, user_id)
@@ -242,12 +242,12 @@ async def admin_spin_down_user_service(
     db: AsyncSession = Depends(get_session),
     _: User = Depends(verify_admin_jwt),
 ):
-    """Admin: spin down a user's Railway service."""
+    """Admin: spin down a user's Docker container."""
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    if not user.railway_service_id:
+    if user.status != UserStatus.ACTIVE:
         return {"status": "no_service", "message": "User has no active service"}
 
     session_manager = get_session_manager()
@@ -257,7 +257,7 @@ async def admin_spin_down_user_service(
         id=str(uuid.uuid4()),
         user_id=user_id,
         action="admin.service_spun_down",
-        details={"service_id": user.railway_service_id},
+        details={"user_id": user_id, "previous_status": "active"},
         performed_by="admin_agent",
     )
     db.add(log)
@@ -284,9 +284,9 @@ async def list_active_sessions(
     db: AsyncSession = Depends(get_session),
     _: User = Depends(verify_admin_jwt),
 ):
-    """List all users with active Railway services."""
+    """List all users with active Docker containers."""
     result = await db.execute(
-        select(User).where(User.railway_service_id.isnot(None)).order_by(User.updated_at.desc())
+        select(User).where(User.status == UserStatus.ACTIVE).order_by(User.updated_at.desc())
     )
     active_users = result.scalars().all()
 
@@ -297,8 +297,6 @@ async def list_active_sessions(
                 "user_id": u.id,
                 "email": u.email,
                 "display_name": u.display_name,
-                "service_id": u.railway_service_id,
-                "volume_id": u.volume_id,
                 "status": u.status.value,
                 "updated_at": u.updated_at.isoformat() if u.updated_at else None,
             }
@@ -324,10 +322,7 @@ async def platform_metrics(
         select(func.count(User.id)).where(User.status == UserStatus.PENDING)
     )
     active_services = await db.scalar(
-        select(func.count(User.railway_service_id)).where(User.railway_service_id.isnot(None))
-    )
-    total_volumes = await db.scalar(
-        select(func.count(User.volume_id)).where(User.volume_id.isnot(None))
+        select(func.count(User.id)).where(User.status == UserStatus.ACTIVE)
     )
 
     return {
@@ -336,5 +331,4 @@ async def platform_metrics(
         "suspended_users": suspended_users or 0,
         "pending_users": pending_users or 0,
         "active_services": active_services or 0,
-        "total_volumes": total_volumes or 0,
     }

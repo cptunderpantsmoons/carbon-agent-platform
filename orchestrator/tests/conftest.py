@@ -42,5 +42,5 @@ def sample_session_data():
         "user_id": "user-001",
         "status": "active",
         "internal_url": "http://agent-001.internal:8000",
-        "public_url": "https://agent-001.up.railway.app",
+        "public_url": "https://agents.carbon.dev/agent/user-001",
     }

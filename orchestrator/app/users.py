@@ -135,7 +135,7 @@ async def ensure_my_service(
     user: User = Depends(verify_user_api_key),
     db: AsyncSession = Depends(get_session),
 ):
-    """Ensure user has an active Railway service (spin up if needed)."""
+    """Ensure user has an active Docker container (spin up if needed)."""
     session_manager = get_session_manager()
     was_created, _ = await session_manager.ensure_user_service(db, user.id)
     await db.commit()
@@ -152,7 +152,7 @@ async def spin_down_my_service(
     user: User = Depends(verify_user_api_key),
     db: AsyncSession = Depends(get_session),
 ):
-    """Spin down user's Railway service."""
+    """Spin down user's Docker container."""
     session_manager = get_session_manager()
     result = await session_manager.spin_down_user_service(db, user.id)
     await db.commit()
@@ -169,7 +169,7 @@ async def get_my_service_status(
     user: User = Depends(verify_user_api_key),
     db: AsyncSession = Depends(get_session),
 ):
-    """Get current user's Railway service status."""
+    """Get current user's container status."""
     session_manager = get_session_manager()
     status = await session_manager.get_service_status(db, user.id)
 
@@ -178,11 +178,8 @@ async def get_my_service_status(
 
     return {
         "active": True,
-        "service_id": status["service_id"],
-        "volume_id": status["volume_id"],
+        "user_id": status.get("user_id"),
         "status": status.get("status"),
-        "updated_at": status.get("updated_at"),
-        "instances": status.get("instances", []),
         "service_url": status.get("service_url"),
     }
 

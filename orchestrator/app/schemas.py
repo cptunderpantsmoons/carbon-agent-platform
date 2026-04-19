@@ -77,55 +77,21 @@ class PlatformHealth(BaseModel):
     total_volumes: int
 
 
-# --- Railway schemas ---
+# --- Docker schemas ---
 
-class RailwayServiceResponse(BaseModel):
+class DockerContainerResponse(BaseModel):
     id: str
     name: str
-    project_id: str
-    updated_at: str | None = None
-    status: str | None = None
-
-    model_config = {"from_attributes": True}
-
-
-class RailwayVolumeResponse(BaseModel):
-    id: str
-    name: str
-    project_id: str
-    size: int | None = None
-    mount_path: str | None = None
-
-    model_config = {"from_attributes": True}
-
-
-class RailwayDeploymentResponse(BaseModel):
-    id: str
     status: str
     created_at: str | None = None
     updated_at: str | None = None
-    domain: dict[str, Any] | None = None
-    builder: dict[str, Any] | None = None
 
     model_config = {"from_attributes": True}
 
 
-class RailwayServiceCreate(BaseModel):
-    name: str
+class DockerContainerCreate(BaseModel):
+    user_id: str
     docker_image: str
-    memory: str = "1GB"
-    cpu: int = 1
-    volume_id: str | None = None
-    env_vars: dict[str, str] | None = None
-
-
-class RailwayVolumeCreate(BaseModel):
-    name: str
-    size_gb: int = 5
-    mount_path: str = "/data"
-
-
-class RailwayDeploymentCreate(BaseModel):
-    service_id: str
-    docker_image: str
+    memory_limit: str = "512m"
+    cpu_nanos: int = 500000000
     env_vars: dict[str, str] | None = None

@@ -50,8 +50,6 @@ async def test_user(db_session):
         api_key="sk-user-test-key-123",
         status=UserStatus.ACTIVE,
         clerk_user_id="user_clerk_abc",
-        railway_service_id="svc-123",
-        volume_id="vol-123",
     )
     db_session.add(user)
     await db_session.commit()

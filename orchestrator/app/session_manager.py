@@ -1,4 +1,4 @@
-"""Session manager for handling Railway service lifecycle and user sessions."""
+"""Session manager for handling Docker container lifecycle and user sessions."""
 import asyncio
 import weakref
 from datetime import datetime, timezone, timedelta
@@ -8,7 +8,7 @@ from sqlalchemy import select
 import structlog
 
 from app.models import User, UserStatus
-from app.railway import RailwayClient, get_railway_client
+from app.docker_manager import DockerServiceManager
 from app.config import get_settings
 from app.database import create_session
 
@@ -16,7 +16,7 @@ logger = structlog.get_logger()
 
 
 class SessionManager:
-    """Manages user sessions and Railway service lifecycle."""
+    """Manages user sessions and Docker container lifecycle."""
 
     def __init__(self):
         self._active_sessions: Dict[str, datetime] = {}  # user_id -> last_activity
@@ -26,6 +26,7 @@ class SessionManager:
             weakref.WeakValueDictionary()
         )
         self._cleanup_task: Optional[asyncio.Task] = None
+        self.docker_manager = DockerServiceManager()
 
     async def start_cleanup_task(self) -> None:
         """Start the background cleanup task for idle sessions."""
@@ -63,7 +64,7 @@ class SessionManager:
         db: AsyncSession,
         user_id: str,
     ) -> tuple[bool, Optional[str]]:
-        """Ensure the user has an active Railway service.
+        """Ensure the user has an active Docker container.
 
         Args:
             db: Database session
@@ -88,11 +89,10 @@ class SessionManager:
                     return False, None
 
                 # Check if user already has a service
-                if user.railway_service_id:
+                if user.status == UserStatus.ACTIVE:
                     logger.info(
                         "user_already_has_service",
                         user_id=user_id,
-                        service_id=user.railway_service_id,
                     )
                     return False, None
 
@@ -113,10 +113,10 @@ class SessionManager:
         user: User,
         user_id: str,
     ) -> None:
-        """Spin up a Railway service for a user.
+        """Spin up a Docker container for a user.
 
-        Creates a volume, creates a service, mounts the volume to the service,
-        then triggers a deployment with the user's environment variables.
+        Calls DockerManager to create and start the container with
+        resource limits and Traefik routing labels.
 
         Args:
             db: Database session
@@ -124,101 +124,29 @@ class SessionManager:
             user_id: User ID
 
         Raises:
-            Exception: If any step of service creation fails (with cleanup on error)
+            Exception: If container creation fails
         """
-        settings = get_settings()
-        railway_client = await get_railway_client()
-
-        created_volume_id = None
-        created_service_id = None
+        env_vars = {
+            "USER_ID": user_id,
+            "API_KEY": user.api_key,
+            "DISPLAY_NAME": user.display_name,
+        }
 
         try:
-            # Step 1: Create volume for persistent storage
-            volume_name = f"user-{user_id}-volume"
-            volume_response = await railway_client.create_volume(
-                name=volume_name,
-                size_gb=settings.volume_size_gb,
-                mount_path=settings.volume_mount_path,
-            )
-            volume_id = volume_response["id"]
-            created_volume_id = volume_id
-            logger.info("volume_created", volume_id=volume_id, user_id=user_id)
-
-            # Step 2: Create service
-            service_name = f"user-{user_id}-service"
-            service_response = await railway_client.create_service(
-                name=service_name,
-                docker_image=settings.agent_docker_image,
-                memory=settings.agent_default_memory,
-                cpu=settings.agent_default_cpu,
-            )
-            service_id = service_response["id"]
-            created_service_id = service_id
-            logger.info("service_created", service_id=service_id, user_id=user_id)
-
-            # Step 3: Mount volume to service (previously missing!)
-            await railway_client.mount_volume_to_service(
-                volume_id=volume_id,
-                service_id=service_id,
-                mount_path=settings.volume_mount_path,
-            )
+            result = await self.docker_manager.ensure_user_service(user_id, env_vars)
             logger.info(
-                "volume_mounted_to_service",
-                volume_id=volume_id,
-                service_id=service_id,
+                "container_created",
+                container_id=result["container_id"],
                 user_id=user_id,
             )
 
-            # Step 4: Deploy with environment variables
-            env_vars = {
-                "USER_ID": user_id,
-                "API_KEY": user.api_key,
-                "DISPLAY_NAME": user.display_name,
-            }
-            deployment_response = await railway_client.create_deployment(
-                service_id=service_id,
-                docker_image=settings.agent_docker_image,
-                env_vars=env_vars,
-            )
-            deployment_id = deployment_response["id"]
-            logger.info(
-                "deployment_created",
-                deployment_id=deployment_id,
-                service_id=service_id,
-                user_id=user_id,
-            )
-
-            # Step 5: Persist IDs — ORM onupdate handles updated_at automatically
-            user.railway_service_id = service_id
-            user.volume_id = volume_id
+            # Update user status
             user.status = UserStatus.ACTIVE
 
-            logger.info("service_spinup_complete", service_id=service_id, user_id=user_id)
+            logger.info("service_spinup_complete", user_id=user_id)
 
         except Exception as e:
             logger.error("service_spinup_failed", user_id=user_id, error=str(e))
-            # Best-effort cleanup of partially created resources
-            if created_service_id:
-                try:
-                    await railway_client.delete_service(created_service_id)
-                    logger.info("cleanup_service_deleted", service_id=created_service_id)
-                except Exception as cleanup_err:
-                    logger.error(
-                        "cleanup_service_failed",
-                        service_id=created_service_id,
-                        error=str(cleanup_err),
-                    )
-
-            if created_volume_id:
-                try:
-                    await railway_client.delete_volume(created_volume_id)
-                    logger.info("cleanup_volume_deleted", volume_id=created_volume_id)
-                except Exception as cleanup_err:
-                    logger.error(
-                        "cleanup_volume_failed",
-                        volume_id=created_volume_id,
-                        error=str(cleanup_err),
-                    )
             raise
 
     async def spin_down_user_service(
@@ -226,7 +154,7 @@ class SessionManager:
         db: AsyncSession,
         user_id: str,
     ) -> bool:
-        """Spin down a user's Railway service.
+        """Spin down a user's Docker container.
 
         Args:
             db: Database session
@@ -246,7 +174,7 @@ class SessionManager:
                     logger.error("spin_down_user_not_found", user_id=user_id)
                     return False
 
-                if not user.railway_service_id:
+                if user.status != UserStatus.ACTIVE:
                     logger.info("spin_down_no_service", user_id=user_id)
                     return False
 
@@ -269,7 +197,7 @@ class SessionManager:
         user: User,
         user_id: str,
     ) -> None:
-        """Tear down the Railway service and volume for a user.
+        """Stop and remove the Docker container for a user.
 
         Args:
             db: Database session
@@ -277,25 +205,12 @@ class SessionManager:
             user_id: User ID
 
         Raises:
-            Exception: If service deletion fails
+            Exception: If container deletion fails
         """
-        railway_client = await get_railway_client()
-
         try:
-            service_id = user.railway_service_id
-            volume_id = user.volume_id
+            logger.info("stopping_container", user_id=user_id)
+            await self.docker_manager.spin_down_user_service(user_id)
 
-            if service_id:
-                logger.info("deleting_service", service_id=service_id, user_id=user_id)
-                await railway_client.delete_service(service_id)
-
-            if volume_id:
-                logger.info("deleting_volume", volume_id=volume_id, user_id=user_id)
-                await railway_client.delete_volume(volume_id)
-
-            # ORM onupdate handles updated_at automatically
-            user.railway_service_id = None
-            user.volume_id = None
             user.status = UserStatus.PENDING
 
             logger.info("service_spindown_complete", user_id=user_id)
@@ -317,7 +232,7 @@ class SessionManager:
         db: AsyncSession,
         user_id: str,
     ) -> Optional[Dict]:
-        """Get the status of a user's Railway service.
+        """Get the status of a user's Docker container.
 
         Args:
             db: Database session
@@ -329,30 +244,16 @@ class SessionManager:
         result = await db.execute(select(User).where(User.id == user_id))
         user = result.scalar_one_or_none()
 
-        if not user or not user.railway_service_id:
+        if not user or user.status != UserStatus.ACTIVE:
             return None
 
-        railway_client = await get_railway_client()
-
         try:
-            service = await railway_client.get_service(user.railway_service_id)
-            
-            # Extract service URL from domains or generate from Railway app URL
-            service_url = None
-            domains = service.get("domains", [])
-            if domains:
-                service_url = f"https://{domains[0].get('domain', '')}"
-            elif service.get("name"):
-                # Fallback to Railway app URL pattern
-                service_url = f"https://{service['name']}.up.railway.app"
+            container_status = await self.docker_manager.get_container_status(user_id)
             
             return {
-                "service_id": user.railway_service_id,
-                "volume_id": user.volume_id,
-                "status": service.get("status"),
-                "updated_at": service.get("updatedAt"),
-                "instances": service.get("serviceInstances", []),
-                "service_url": service_url,
+                "user_id": user_id,
+                "status": container_status,
+                "service_url": f"https://{get_settings().agent_domain}/agent/{user_id}",
             }
         except Exception as e:
             logger.error("get_service_status_error", user_id=user_id, error=str(e))
@@ -367,7 +268,7 @@ class SessionManager:
         return create_session()
 
     async def provision_user_background(self, user_id: str) -> bool:
-        """Provision a Railway service for a newly registered user.
+        """Provision a Docker container for a newly registered user.
 
         Designed to run as a fire-and-forget background task from the Clerk
         webhook handler so the webhook response returns immediately. Creates
@@ -376,28 +277,38 @@ class SessionManager:
         Idempotent: safe to call even if the user already has a service.
 
         Args:
-            user_id: Platform user ID to provision a service for.
+            user_id: Platform user ID to provision a container for.
 
         Returns:
-            True if a new service was provisioned, False if already existed.
+            True if a new container was provisioned, False if already existed.
+
+        Raises:
+            Exception: Re-raised so asyncio.create_task logs the exception.
         """
         db = create_session()
         try:
+            logger.info("starting_user_provisioning", user_id=user_id)
             was_created, _ = await self.ensure_user_service(db, user_id)
-            logger.info(
-                "background_provision_complete",
-                user_id=user_id,
-                was_created=was_created,
-            )
+
+            if was_created:
+                logger.info("user_provisioned_successfully", user_id=user_id)
+            else:
+                logger.info("user_already_had_service", user_id=user_id)
+
             return was_created
         except Exception as e:
-            logger.error("background_provision_failed", user_id=user_id, error=str(e))
-            return False
+            logger.error(
+                "user_provisioning_failed",
+                user_id=user_id,
+                error=str(e),
+                error_type=type(e).__name__,
+            )
+            raise  # Re-raise so asyncio.create_task logs the exception
         finally:
             await db.close()
 
     async def spin_down_idle_user(self, user_id: str) -> bool:
-        """Spin down an idle user's Railway service.
+        """Spin down an idle user's Docker container.
 
         Creates its own database session since the cleanup task runs
         independently of request lifecycle.
@@ -417,7 +328,7 @@ class SessionManager:
                 logger.error("idle_cleanup_user_not_found", user_id=user_id)
                 return False
 
-            if not user.railway_service_id:
+            if user.status != UserStatus.ACTIVE:
                 logger.info("idle_cleanup_no_service", user_id=user_id)
                 if user_id in self._active_sessions:
                     del self._active_sessions[user_id]

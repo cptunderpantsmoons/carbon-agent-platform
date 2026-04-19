@@ -4,11 +4,17 @@ from functools import lru_cache
 
 
 class Settings(BaseSettings):
-    # Railway
-    railway_api_token: str = ""
-    railway_project_id: str = ""
-    railway_team_id: str = ""
-    railway_environment_id: str = ""
+    # Docker (self-hosted PaaS)
+    docker_network: str = "carbon-agent-net"
+    agent_docker_image: str = "carbon-agent-adapter:latest"
+    agent_memory_limit: str = "512m"  # Per-user RAM limit (e.g., "512m", "1g")
+    agent_cpu_nanos: int = 500000000  # Per-user CPU limit in nanos (500000000 = 0.5 CPU)
+    adapter_port: int = 8001  # Port the adapter listens on inside container
+
+    # Traefik (reverse proxy)
+    agent_domain: str = "agents.carbon.dev"
+    traefik_entrypoint: str = "websecure"
+    agent_base_path: str = "/agent"  # Path prefix for routing to agents
 
     # Database
     database_url: str = "postgresql://postgres:postgres@localhost:5432/carbon_platform"
@@ -31,14 +37,8 @@ class Settings(BaseSettings):
     session_max_lifetime_hours: int = 24
     session_spinup_timeout_seconds: int = 120
 
-    # Volumes
-    volume_size_gb: int = 5
+    # Volumes (persistent storage for agents)
     volume_mount_path: str = "/data"
-
-    # Agent
-    agent_docker_image: str = "carbon-agent-adapter:latest"
-    agent_default_memory: str = "1GB"
-    agent_default_cpu: int = 1
 
     # Clerk Authentication
     clerk_secret_key: str = ""

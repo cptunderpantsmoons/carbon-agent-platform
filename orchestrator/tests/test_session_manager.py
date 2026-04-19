@@ -1,4 +1,4 @@
-"""Tests for session manager and Railway service lifecycle."""
+"""Tests for session manager and Docker container lifecycle."""
 import pytest
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -24,8 +24,6 @@ def mock_user():
         display_name="Test User",
         api_key="test-api-key-123",
         status=UserStatus.PENDING,
-        railway_service_id=None,
-        volume_id=None,
     )
     return user
 
@@ -44,40 +42,29 @@ async def test_ensure_user_service_creates_new_service(
     session_manager,
     mock_user,
 ):
-    """Test that ensure_user_service creates a new Railway service."""
+    """Test that ensure_user_service creates a new Docker container."""
     # Mock database session
     mock_db = AsyncMock(spec=AsyncSession)
     mock_result = MagicMock()
     mock_result.scalar_one_or_none.return_value = mock_user
     mock_db.execute.return_value = mock_result
 
-    # Mock Railway client
-    mock_railway_client = AsyncMock()
-    mock_railway_client.create_volume.return_value = {"id": "vol-123"}
-    mock_railway_client.create_service.return_value = {"id": "svc-123"}
-    mock_railway_client.create_deployment.return_value = {"id": "deploy-123"}
+    # Mock Docker manager
+    mock_docker = AsyncMock()
+    mock_docker.ensure_user_service.return_value = {
+        "action": "created",
+        "container_id": "abc123def456",
+        "was_created": True,
+    }
 
-    with patch("app.session_manager.get_railway_client", return_value=mock_railway_client):
-        with patch("app.session_manager.get_settings") as mock_settings:
-            settings = MagicMock()
-            settings.volume_size_gb = 5
-            settings.volume_mount_path = "/data"
-            settings.agent_docker_image = "carbon-agent-adapter:latest"
-            settings.agent_default_memory = "1GB"
-            settings.agent_default_cpu = 1
-            mock_settings.return_value = settings
+    with patch.object(session_manager, "docker_manager", mock_docker):
+        was_created, _ = await session_manager.ensure_user_service(mock_db, "test-user-1")
 
-            was_created, _ = await session_manager.ensure_user_service(mock_db, "test-user-1")
+        assert was_created is True
+        assert mock_user.status == UserStatus.ACTIVE
 
-            assert was_created is True
-            assert mock_user.railway_service_id == "svc-123"
-            assert mock_user.volume_id == "vol-123"
-            assert mock_user.status == UserStatus.ACTIVE
-
-            # Verify Railway operations were called
-            mock_railway_client.create_volume.assert_called_once()
-            mock_railway_client.create_service.assert_called_once()
-            mock_railway_client.create_deployment.assert_called_once()
+        # Verify Docker operations were called
+        mock_docker.ensure_user_service.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -85,10 +72,9 @@ async def test_ensure_user_service_skips_existing_service(
     session_manager,
     mock_user,
 ):
-    """Test that ensure_user_service skips if service already exists."""
-    # Mock user with existing service
-    mock_user.railway_service_id = "existing-svc-123"
-    mock_user.volume_id = "existing-vol-123"
+    """Test that ensure_user_service skips if container already exists."""
+    # Mock user with existing active service
+    mock_user.status = UserStatus.ACTIVE
 
     # Mock database session
     mock_db = AsyncMock(spec=AsyncSession)
@@ -96,17 +82,16 @@ async def test_ensure_user_service_skips_existing_service(
     mock_result.scalar_one_or_none.return_value = mock_user
     mock_db.execute.return_value = mock_result
 
-    # Mock Railway client (should not be called)
-    mock_railway_client = AsyncMock()
+    # Mock Docker manager (should not be called)
+    mock_docker = AsyncMock()
 
-    with patch("app.session_manager.get_railway_client", return_value=mock_railway_client):
+    with patch.object(session_manager, "docker_manager", mock_docker):
         was_created, _ = await session_manager.ensure_user_service(mock_db, "test-user-1")
 
         assert was_created is False
 
-        # Verify Railway operations were NOT called
-        mock_railway_client.create_volume.assert_not_called()
-        mock_railway_client.create_service.assert_not_called()
+        # Verify Docker operations were NOT called
+        mock_docker.ensure_user_service.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -131,10 +116,8 @@ async def test_spin_down_user_service(
     session_manager,
     mock_user,
 ):
-    """Test spinning down a user's Railway service."""
+    """Test spinning down a user's Docker container."""
     # Set up user with active service
-    mock_user.railway_service_id = "svc-123"
-    mock_user.volume_id = "vol-123"
     mock_user.status = UserStatus.ACTIVE
 
     # Mock database session
@@ -143,22 +126,17 @@ async def test_spin_down_user_service(
     mock_result.scalar_one_or_none.return_value = mock_user
     mock_db.execute.return_value = mock_result
 
-    # Mock Railway client
-    mock_railway_client = AsyncMock()
-    mock_railway_client.delete_service.return_value = True
-    mock_railway_client.delete_volume.return_value = True
+    # Mock Docker manager
+    mock_docker = AsyncMock()
 
-    with patch("app.session_manager.get_railway_client", return_value=mock_railway_client):
+    with patch.object(session_manager, "docker_manager", mock_docker):
         result = await session_manager.spin_down_user_service(mock_db, "test-user-1")
 
         assert result is True
-        assert mock_user.railway_service_id is None
-        assert mock_user.volume_id is None
         assert mock_user.status == UserStatus.PENDING
 
-        # Verify Railway operations were called
-        mock_railway_client.delete_service.assert_called_once_with("svc-123")
-        mock_railway_client.delete_volume.assert_called_once_with("vol-123")
+        # Verify Docker operations were called
+        mock_docker.spin_down_user_service.assert_called_once_with("test-user-1")
 
 
 @pytest.mark.asyncio
@@ -166,10 +144,9 @@ async def test_spin_down_user_service_handles_no_service(
     session_manager,
     mock_user,
 ):
-    """Test spin down when user has no service."""
-    # Mock user without service
-    mock_user.railway_service_id = None
-    mock_user.volume_id = None
+    """Test spin down when user has no active container."""
+    # Mock user without active service
+    mock_user.status = UserStatus.PENDING
 
     # Mock database session
     mock_db = AsyncMock(spec=AsyncSession)
@@ -177,17 +154,16 @@ async def test_spin_down_user_service_handles_no_service(
     mock_result.scalar_one_or_none.return_value = mock_user
     mock_db.execute.return_value = mock_result
 
-    # Mock Railway client (should not be called)
-    mock_railway_client = AsyncMock()
+    # Mock Docker manager (should not be called)
+    mock_docker = AsyncMock()
 
-    with patch("app.session_manager.get_railway_client", return_value=mock_railway_client):
+    with patch.object(session_manager, "docker_manager", mock_docker):
         result = await session_manager.spin_down_user_service(mock_db, "test-user-1")
 
         assert result is False
 
-        # Verify Railway operations were NOT called
-        mock_railway_client.delete_service.assert_not_called()
-        mock_railway_client.delete_volume.assert_not_called()
+        # Verify Docker operations were NOT called
+        mock_docker.spin_down_user_service.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -208,10 +184,9 @@ async def test_get_service_status(
     session_manager,
     mock_user,
 ):
-    """Test getting service status."""
+    """Test getting container status via Docker manager."""
     # Set up user with active service
-    mock_user.railway_service_id = "svc-123"
-    mock_user.volume_id = "vol-123"
+    mock_user.status = UserStatus.ACTIVE
 
     # Mock database session
     mock_db = AsyncMock(spec=AsyncSession)
@@ -219,26 +194,16 @@ async def test_get_service_status(
     mock_result.scalar_one_or_none.return_value = mock_user
     mock_db.execute.return_value = mock_result
 
-    # Mock Railway client
-    mock_railway_client = AsyncMock()
-    mock_railway_client.get_service.return_value = {
-        "id": "svc-123",
-        "name": "user-test-service",
-        "status": "running",
-        "updatedAt": "2026-04-16T00:00:00Z",
-        "serviceInstances": [
-            {"id": "inst-1", "status": "running", "createdAt": "2026-04-16T00:00:00Z"}
-        ],
-    }
+    # Mock Docker manager
+    mock_docker = AsyncMock()
+    mock_docker.get_container_status.return_value = "running"
 
-    with patch("app.session_manager.get_railway_client", return_value=mock_railway_client):
+    with patch.object(session_manager, "docker_manager", mock_docker):
         status = await session_manager.get_service_status(mock_db, "test-user-1")
 
         assert status is not None
-        assert status["service_id"] == "svc-123"
-        assert status["volume_id"] == "vol-123"
         assert status["status"] == "running"
-        assert len(status["instances"]) == 1
+        assert "service_url" in status
 
 
 @pytest.mark.asyncio
@@ -246,10 +211,9 @@ async def test_get_service_status_no_service(
     session_manager,
     mock_user,
 ):
-    """Test getting service status when user has no service."""
-    # Mock user without service
-    mock_user.railway_service_id = None
-    mock_user.volume_id = None
+    """Test getting service status when user has no active container."""
+    # Mock user without active service
+    mock_user.status = UserStatus.PENDING
 
     # Mock database session
     mock_db = AsyncMock(spec=AsyncSession)
@@ -346,77 +310,27 @@ async def test_concurrent_session_operations(
     mock_result.scalar_one_or_none.return_value = mock_user
     mock_db.execute.return_value = mock_result
 
-    # Mock Railway client
-    mock_railway_client = AsyncMock()
-    mock_railway_client.create_volume.return_value = {"id": "vol-123"}
-    mock_railway_client.create_service.return_value = {"id": "svc-123"}
-    mock_railway_client.create_deployment.return_value = {"id": "deploy-123"}
+    # Mock Docker manager
+    mock_docker = AsyncMock()
+    mock_docker.ensure_user_service.return_value = {
+        "action": "created",
+        "container_id": "abc123",
+        "was_created": True,
+    }
 
-    with patch("app.session_manager.get_railway_client", return_value=mock_railway_client):
-        with patch("app.session_manager.get_settings") as mock_settings:
-            settings = MagicMock()
-            settings.volume_size_gb = 5
-            settings.volume_mount_path = "/data"
-            settings.agent_docker_image = "carbon-agent-adapter:latest"
-            settings.agent_default_memory = "1GB"
-            settings.agent_default_cpu = 1
-            mock_settings.return_value = settings
+    with patch.object(session_manager, "docker_manager", mock_docker):
+        # Start multiple concurrent operations for same user
+        tasks = [
+            session_manager.ensure_user_service(mock_db, "test-user-1"),
+            session_manager.ensure_user_service(mock_db, "test-user-1"),
+            session_manager.ensure_user_service(mock_db, "test-user-1"),
+        ]
 
-            # Start multiple concurrent operations for same user
-            tasks = [
-                session_manager.ensure_user_service(mock_db, "test-user-1"),
-                session_manager.ensure_user_service(mock_db, "test-user-1"),
-                session_manager.ensure_user_service(mock_db, "test-user-1"),
-            ]
+        results = await asyncio.gather(*tasks)
 
-            results = await asyncio.gather(*tasks)
-
-            # Only one should create the service, others should skip
-            created_count = sum(1 for was_created, _ in results if was_created)
-            assert created_count == 1
-
-            # Verify service was only created once
-            mock_railway_client.create_volume.assert_called_once()
-
-
-@pytest.mark.asyncio
-async def test_spin_up_with_env_vars(
-    session_manager,
-    mock_user,
-):
-    """Test that service is spun up with correct environment variables."""
-    # Mock database session
-    mock_db = AsyncMock(spec=AsyncSession)
-    mock_result = MagicMock()
-    mock_result.scalar_one_or_none.return_value = mock_user
-    mock_db.execute.return_value = mock_result
-
-    # Mock Railway client
-    mock_railway_client = AsyncMock()
-    mock_railway_client.create_volume.return_value = {"id": "vol-123"}
-    mock_railway_client.create_service.return_value = {"id": "svc-123"}
-    mock_railway_client.create_deployment.return_value = {"id": "deploy-123"}
-
-    with patch("app.session_manager.get_railway_client", return_value=mock_railway_client):
-        with patch("app.session_manager.get_settings") as mock_settings:
-            settings = MagicMock()
-            settings.volume_size_gb = 5
-            settings.volume_mount_path = "/data"
-            settings.agent_docker_image = "carbon-agent-adapter:latest"
-            settings.agent_default_memory = "1GB"
-            settings.agent_default_cpu = 1
-            mock_settings.return_value = settings
-
-            await session_manager.ensure_user_service(mock_db, "test-user-1")
-
-            # Verify deployment was created with correct env vars
-            call_args = mock_railway_client.create_deployment.call_args
-            env_vars = call_args.kwargs.get("env_vars")
-
-            assert env_vars is not None
-            assert env_vars["USER_ID"] == "test-user-1"
-            assert env_vars["API_KEY"] == "test-api-key-123"
-            assert env_vars["DISPLAY_NAME"] == "Test User"
+        # Only one should create the service, others should skip
+        created_count = sum(1 for was_created, _ in results if was_created)
+        assert created_count == 1
 
 
 @pytest.mark.asyncio
@@ -424,42 +338,27 @@ async def test_spin_up_failure_cleanup(
     session_manager,
     mock_user,
 ):
-    """Test that partial service creation is cleaned up on failure."""
+    """Test that container creation failure is handled correctly."""
     # Mock database session
     mock_db = AsyncMock(spec=AsyncSession)
     mock_result = MagicMock()
     mock_result.scalar_one_or_none.return_value = mock_user
     mock_db.execute.return_value = mock_result
 
-    # Mock Railway client with partial failure
-    mock_railway_client = AsyncMock()
-    mock_railway_client.create_volume.return_value = {"id": "vol-123"}
-    mock_railway_client.create_service.side_effect = Exception("Service creation failed")
+    # Mock Docker manager with failure
+    mock_docker = AsyncMock()
+    mock_docker.ensure_user_service.side_effect = Exception("Container creation failed")
 
-    with patch("app.session_manager.get_railway_client", return_value=mock_railway_client):
-        with patch("app.session_manager.get_settings") as mock_settings:
-            settings = MagicMock()
-            settings.volume_size_gb = 5
-            settings.volume_mount_path = "/data"
-            settings.agent_docker_image = "carbon-agent-adapter:latest"
-            settings.agent_default_memory = "1GB"
-            settings.agent_default_cpu = 1
-            mock_settings.return_value = settings
-
-            # Should raise exception
-            with pytest.raises(Exception, match="Service creation failed"):
-                await session_manager.ensure_user_service(mock_db, "test-user-1")
-
-            # Verify volume was cleaned up
-            mock_railway_client.delete_volume.assert_called_once_with("vol-123")
+    with patch.object(session_manager, "docker_manager", mock_docker):
+        # Should raise exception
+        with pytest.raises(Exception, match="Container creation failed"):
+            await session_manager.ensure_user_service(mock_db, "test-user-1")
 
 
 @pytest.mark.asyncio
 async def test_spin_down_idle_user_success(session_manager, mock_user):
-    """Test spinning down an idle user's service with self-created DB session."""
+    """Test spinning down an idle user's container with self-created DB session."""
     # Set up user with active service
-    mock_user.railway_service_id = "svc-123"
-    mock_user.volume_id = "vol-123"
     mock_user.status = UserStatus.ACTIVE
 
     # Mock database session
@@ -468,27 +367,22 @@ async def test_spin_down_idle_user_success(session_manager, mock_user):
     mock_result.scalar_one_or_none.return_value = mock_user
     mock_db.execute.return_value = mock_result
 
-    # Mock Railway client
-    mock_railway_client = AsyncMock()
-    mock_railway_client.delete_service.return_value = True
-    mock_railway_client.delete_volume.return_value = True
+    # Mock Docker manager
+    mock_docker = AsyncMock()
 
     # Record activity so user is in active sessions
     await session_manager.record_activity("test-user-1")
     assert "test-user-1" in session_manager._active_sessions
 
-    with patch("app.session_manager.get_railway_client", return_value=mock_railway_client):
+    with patch.object(session_manager, "docker_manager", mock_docker):
         with patch.object(session_manager, "_get_db_session", return_value=mock_db):
             result = await session_manager.spin_down_idle_user("test-user-1")
 
             assert result is True
-            assert mock_user.railway_service_id is None
-            assert mock_user.volume_id is None
             assert mock_user.status == UserStatus.PENDING
 
-            # Verify Railway operations were called
-            mock_railway_client.delete_service.assert_called_once_with("svc-123")
-            mock_railway_client.delete_volume.assert_called_once_with("vol-123")
+            # Verify Docker operations were called
+            mock_docker.spin_down_user_service.assert_called_once_with("test-user-1")
 
             # Verify user was removed from active sessions
             assert "test-user-1" not in session_manager._active_sessions
@@ -499,10 +393,9 @@ async def test_spin_down_idle_user_success(session_manager, mock_user):
 
 @pytest.mark.asyncio
 async def test_spin_down_idle_user_no_service(session_manager, mock_user):
-    """Test spin_down_idle_user when user has no service."""
-    # Mock user without service
-    mock_user.railway_service_id = None
-    mock_user.volume_id = None
+    """Test spin_down_idle_user when user has no active container."""
+    # Mock user without active service
+    mock_user.status = UserStatus.PENDING
 
     # Mock database session
     mock_db = AsyncMock(spec=AsyncSession)
@@ -514,18 +407,17 @@ async def test_spin_down_idle_user_no_service(session_manager, mock_user):
     await session_manager.record_activity("test-user-1")
     assert "test-user-1" in session_manager._active_sessions
 
-    # Mock Railway client (should not be called)
-    mock_railway_client = AsyncMock()
+    # Mock Docker manager (should not be called)
+    mock_docker = AsyncMock()
 
-    with patch("app.session_manager.get_railway_client", return_value=mock_railway_client):
+    with patch.object(session_manager, "docker_manager", mock_docker):
         with patch.object(session_manager, "_get_db_session", return_value=mock_db):
             result = await session_manager.spin_down_idle_user("test-user-1")
 
             assert result is False
 
-            # Verify Railway operations were NOT called
-            mock_railway_client.delete_service.assert_not_called()
-            mock_railway_client.delete_volume.assert_not_called()
+            # Verify Docker operations were NOT called
+            mock_docker.spin_down_user_service.assert_not_called()
 
             # User should still be removed from active sessions
             assert "test-user-1" not in session_manager._active_sessions
@@ -562,11 +454,34 @@ async def test_spin_down_idle_user_error_handling(session_manager):
 
 
 @pytest.mark.asyncio
-async def test_cleanup_idle_sessions_actually_spins_down_users(session_manager, mock_user):
-    """Test that the cleanup task actually spins down idle users (not just logs a warning)."""
-    # Set up user with active service
-    mock_user.railway_service_id = "svc-123"
-    mock_user.volume_id = "vol-123"
+async def test_provision_user_background_success(session_manager, mock_user):
+    """Test provision_user_background provisions a new user container."""
+    # Mock database session
+    mock_db = AsyncMock(spec=AsyncSession)
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none.return_value = mock_user
+    mock_db.execute.return_value = mock_result
+
+    # Mock Docker manager
+    mock_docker = AsyncMock()
+    mock_docker.ensure_user_service.return_value = {
+        "action": "created",
+        "container_id": "abc123",
+        "was_created": True,
+    }
+
+    with patch.object(session_manager, "docker_manager", mock_docker):
+        with patch("app.session_manager.create_session", return_value=mock_db):
+            was_created = await session_manager.provision_user_background("test-user-1")
+
+            assert was_created is True
+            mock_db.close.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_provision_user_background_already_exists(session_manager, mock_user):
+    """Test provision_user_background when user already has a service."""
+    # Mock user with active service
     mock_user.status = UserStatus.ACTIVE
 
     # Mock database session
@@ -575,10 +490,46 @@ async def test_cleanup_idle_sessions_actually_spins_down_users(session_manager, 
     mock_result.scalar_one_or_none.return_value = mock_user
     mock_db.execute.return_value = mock_result
 
-    # Mock Railway client
-    mock_railway_client = AsyncMock()
-    mock_railway_client.delete_service.return_value = True
-    mock_railway_client.delete_volume.return_value = True
+    # Mock Docker manager (should not be called)
+    mock_docker = AsyncMock()
+
+    with patch.object(session_manager, "docker_manager", mock_docker):
+        with patch("app.session_manager.create_session", return_value=mock_db):
+            was_created = await session_manager.provision_user_background("test-user-1")
+
+            assert was_created is False
+            mock_docker.ensure_user_service.assert_not_called()
+            mock_db.close.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_provision_user_background_failure_raises(session_manager):
+    """Test that provision_user_background re-raises exceptions."""
+    # Mock database session returning None (user not found)
+    mock_db = AsyncMock(spec=AsyncSession)
+
+    with patch("app.session_manager.create_session", return_value=mock_db):
+        result = await session_manager.provision_user_background("nonexistent-user")
+
+        # Should not raise, just return False
+        assert result is False
+        mock_db.close.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_cleanup_idle_sessions_actually_spins_down_users(session_manager, mock_user):
+    """Test that the cleanup task actually spins down idle users."""
+    # Set up user with active service
+    mock_user.status = UserStatus.ACTIVE
+
+    # Mock database session
+    mock_db = AsyncMock(spec=AsyncSession)
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none.return_value = mock_user
+    mock_db.execute.return_value = mock_result
+
+    # Mock Docker manager
+    mock_docker = AsyncMock()
 
     # Set session activity to old time (beyond timeout)
     old_time = datetime.now(timezone.utc) - timedelta(minutes=30)
@@ -587,9 +538,6 @@ async def test_cleanup_idle_sessions_actually_spins_down_users(session_manager, 
     # Patch spin_down_idle_user to verify it gets called
     with patch.object(session_manager, "spin_down_idle_user", return_value=True) as mock_spin_down:
         # Run one iteration of the cleanup loop manually
-        # We can't easily test the infinite loop, so we test the logic directly
-
-        # Simulate what the cleanup loop does
         from app.config import get_settings
         settings = get_settings()
         idle_timeout = timedelta(minutes=settings.session_idle_timeout_minutes)
@@ -660,8 +608,6 @@ async def test_cleanup_idle_sessions_continues_on_failure(session_manager):
 async def test_cleanup_idle_sessions_removes_from_active_sessions(session_manager, mock_user):
     """Test that cleanup removes users from _active_sessions after spin down."""
     # Set up user with active service
-    mock_user.railway_service_id = "svc-123"
-    mock_user.volume_id = "vol-123"
     mock_user.status = UserStatus.ACTIVE
 
     # Mock database session
@@ -670,14 +616,14 @@ async def test_cleanup_idle_sessions_removes_from_active_sessions(session_manage
     mock_result.scalar_one_or_none.return_value = mock_user
     mock_db.execute.return_value = mock_result
 
-    # Mock Railway client
-    mock_railway_client = AsyncMock()
+    # Mock Docker manager
+    mock_docker = AsyncMock()
 
     # Add user to active sessions
     await session_manager.record_activity("test-user-1")
     assert "test-user-1" in session_manager._active_sessions
 
-    with patch("app.session_manager.get_railway_client", return_value=mock_railway_client):
+    with patch.object(session_manager, "docker_manager", mock_docker):
         with patch.object(session_manager, "_get_db_session", return_value=mock_db):
             result = await session_manager.spin_down_idle_user("test-user-1")
 

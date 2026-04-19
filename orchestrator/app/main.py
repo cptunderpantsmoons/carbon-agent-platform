@@ -18,6 +18,7 @@ from app.scheduler import get_scheduler
 from app.api_key_injection import ApiKeyInjectionMiddleware
 from app.config import get_settings
 from app.rate_limit import limiter, rate_limit_exceeded_handler
+from app.metrics import RequestIDMiddleware, metrics_endpoint
 import structlog
 
 logger = structlog.get_logger()
@@ -54,10 +55,6 @@ def _validate_production_config() -> None:
         "clerk_publishable_key":   "CLERK_PUBLISHABLE_KEY",
         "clerk_frontend_api_url":  "CLERK_FRONTEND_API_URL",
         "clerk_webhook_secret":    "CLERK_WEBHOOK_SECRET",
-        "railway_api_token":       "RAILWAY_API_TOKEN",
-        "railway_project_id":      "RAILWAY_PROJECT_ID",
-        "railway_team_id":         "RAILWAY_TEAM_ID",
-        "railway_environment_id":  "RAILWAY_ENVIRONMENT_ID",
         "database_url":            "DATABASE_URL",
     }
     for attr, env_name in required.items():
@@ -145,6 +142,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Request ID and metrics middleware (before other middlewares for full coverage)
+app.add_middleware(RequestIDMiddleware)
+
 # DB session middleware must come before API key injection
 app.add_middleware(DBSessionMiddleware)
 
@@ -167,3 +167,7 @@ app.include_router(clerk_webhook_router)
 @app.get("/health")
 async def health():
     return {"status": "healthy", "service": "orchestrator"}
+
+
+# Metrics endpoint for Prometheus scraping
+app.add_api_route("/metrics", metrics_endpoint, methods=["GET"])

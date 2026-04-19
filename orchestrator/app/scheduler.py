@@ -14,7 +14,7 @@ from sqlalchemy import delete, select, func, text
 import structlog
 
 from app.models import User, UserStatus, AuditLog
-from app.railway import RailwayClient, get_railway_client
+from app.docker_manager import DockerServiceManager
 from app.config import get_settings
 from app.database import create_session
 
@@ -95,7 +95,7 @@ class Scheduler:
                 await asyncio.sleep(60)  # Wait before retrying
 
     async def _check_service_health(self) -> Dict[str, Any]:
-        """Check the health of all active Railway services.
+        """Check the health of all active Docker containers.
 
         Returns:
             Summary of health check results
@@ -112,38 +112,52 @@ class Scheduler:
         }
 
         try:
-            # Get all users with active railway services
+            # Get all users with active services
             result = await db.execute(
-                select(User).where(User.railway_service_id.isnot(None))
+                select(User).where(User.status == UserStatus.ACTIVE)
             )
             users_with_services = result.scalars().all()
             results["total_services"] = len(users_with_services)
 
-            railway_client = await get_railway_client()
+            docker_manager = DockerServiceManager()
 
             for user in users_with_services:
                 try:
-                    service = await railway_client.get_service(user.railway_service_id)
-                    status = service.get("status", "unknown")
+                    container_status = await docker_manager.get_container_status(user.id)
 
-                    if status in ("running", "deployed"):
+                    if container_status == "running":
                         results["healthy"] += 1
-                    else:
+                    elif container_status == "stopped":
                         results["unhealthy"] += 1
                         logger.warning(
                             "service_unhealthy",
                             user_id=user.id,
-                            service_id=user.railway_service_id,
-                            status=status,
+                            container_status=container_status,
                         )
-                        # Log alert for unhealthy service
                         await self._create_audit_log_entry(
                             db=db,
                             user_id=user.id,
                             action="service_health_alert",
                             details={
-                                "service_id": user.railway_service_id,
-                                "status": status,
+                                "container_status": container_status,
+                                "check_time": datetime.now(timezone.utc).isoformat(),
+                            },
+                            performed_by="scheduler",
+                        )
+                    else:
+                        # Container missing entirely
+                        results["unreachable"] += 1
+                        logger.error(
+                            "service_unreachable",
+                            user_id=user.id,
+                            container_status=container_status,
+                        )
+                        await self._create_audit_log_entry(
+                            db=db,
+                            user_id=user.id,
+                            action="service_unreachable",
+                            details={
+                                "container_status": container_status,
                                 "check_time": datetime.now(timezone.utc).isoformat(),
                             },
                             performed_by="scheduler",
@@ -154,16 +168,13 @@ class Scheduler:
                     logger.error(
                         "service_unreachable",
                         user_id=user.id,
-                        service_id=user.railway_service_id,
                         error=str(e),
                     )
-                    # Log alert for unreachable service
                     await self._create_audit_log_entry(
                         db=db,
                         user_id=user.id,
                         action="service_unreachable",
                         details={
-                            "service_id": user.railway_service_id,
                             "error": str(e),
                             "check_time": datetime.now(timezone.utc).isoformat(),
                         },
@@ -217,7 +228,7 @@ class Scheduler:
             "total_users": 0,
             "active_users": 0,
             "inactive_users": 0,
-            "active_railway_services": 0,
+            "active_docker_containers": 0,
             "total_audit_logs": 0,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
@@ -227,17 +238,17 @@ class Scheduler:
             total_result = await db.execute(select(func.count(User.id)))
             metrics["total_users"] = total_result.scalar() or 0
 
-            # Active users (have railway service)
+            # Active users (have ACTIVE status)
             active_result = await db.execute(
-                select(func.count(User.id)).where(User.railway_service_id.isnot(None))
+                select(func.count(User.id)).where(User.status == UserStatus.ACTIVE)
             )
             metrics["active_users"] = active_result.scalar() or 0
 
-            # Inactive users (no railway service)
+            # Inactive users
             metrics["inactive_users"] = metrics["total_users"] - metrics["active_users"]
 
-            # Active Railway services count (same as active users currently)
-            metrics["active_railway_services"] = metrics["active_users"]
+            # Active Docker containers count (same as active users currently)
+            metrics["active_docker_containers"] = metrics["active_users"]
 
             # Total audit logs
             audit_result = await db.execute(select(func.count(AuditLog.id)))
@@ -449,22 +460,13 @@ class Scheduler:
             audit_result = await db.execute(select(func.count(AuditLog.id)))
             health["audit_log_count"] = audit_result.scalar() or 0
 
-            # Check for orphaned records: users with deleted services
-            # (status is ACTIVE but railway_service_id is null)
+            # Check for inconsistent users: status is ACTIVE but container not running
             orphaned_result = await db.execute(
                 select(func.count(User.id)).where(
                     User.status == UserStatus.ACTIVE,
-                    User.railway_service_id.is_(None),
                 )
             )
-            health["orphaned_users"] = orphaned_result.scalar() or 0
-
-            if health["orphaned_users"] > 0:
-                logger.warning(
-                    "orphaned_users_detected",
-                    count=health["orphaned_users"],
-                    description="Users marked as ACTIVE but without railway services",
-                )
+            health["active_users"] = orphaned_result.scalar() or 0
 
             # Log health status
             await self._create_audit_log_entry(

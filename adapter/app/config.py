@@ -8,8 +8,8 @@ class Settings(BaseSettings):
     agent_api_url: str = "http://localhost:5000"
     agent_api_key: str = ""
 
-    # Per-user Railway service routing
-    railway_service_url_template: str = ""  # e.g. "https://{service_id}.up.railway.app"
+    # Per-user container routing via Traefik
+    agent_domain: str = "agents.carbon.dev"  # Domain for per-user container routing
 
     # Agent Zero context defaults
     default_lifetime_hours: int = 24
@@ -18,6 +18,9 @@ class Settings(BaseSettings):
 
     # Database (shared with orchestrator, SQLite for testing)
     database_url: str = "sqlite+aiosqlite:///./test.db"
+
+    # Redis (for context management and caching)
+    redis_url: str = "redis://localhost:6379/1"
 
     # Server
     port: int = 8000

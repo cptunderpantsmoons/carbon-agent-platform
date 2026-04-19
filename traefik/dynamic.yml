@@ -1,0 +1,33 @@
+# Traefik dynamic configuration
+# This file provides additional routing and middleware configuration
+# Mount it as a volume in the traefik service:
+#   - ./traefik/dynamic.yml:/etc/traefik/dynamic.yml:ro
+#
+# Then add to traefik command:
+#   - "--providers.file.filename=/etc/traefik/dynamic.yml"
+
+http:
+  middlewares:
+    # Security headers for all routes
+    security-headers:
+      headers:
+        browserXssFilter: true
+        contentTypeNosniff: true
+        frameDeny: true
+        sslRedirect: true
+        stsIncludeSubdomains: true
+        stsPreload: true
+        stsSeconds: 31536000
+
+    # Rate limiting for API routes
+    api-rate-limit:
+      rateLimit:
+        average: 100
+        burst: 50
+
+    # Compression for text-based responses
+    compress:
+      compress:
+        excludedContentTypes:
+          - image/*
+          - video/*

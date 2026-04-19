@@ -17,12 +17,11 @@ class UserStatus(str, PyEnum):
 class User(Base):
     __tablename__ = "users"
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    clerk_user_id: Mapped[Optional[str]] = mapped_column(String(255), unique=True, index=True, nullable=True)
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
     display_name: Mapped[str] = mapped_column(String(255))
     api_key: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     status: Mapped[UserStatus] = mapped_column(Enum(UserStatus), default=UserStatus.PENDING)
-    railway_service_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
-    volume_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
     config: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)

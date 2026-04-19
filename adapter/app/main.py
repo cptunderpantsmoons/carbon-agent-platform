@@ -15,29 +15,36 @@ from app.streaming import fake_stream_response
 from app.config import get_settings
 from app.auth import verify_api_key, get_db
 from app.models import User
+from app.metrics import RequestIDMiddleware, metrics_endpoint
 
 logger = structlog.get_logger()
 app = FastAPI(title="Carbon Agent OpenAI Adapter", version="2.0.0")
+
+# Request ID and metrics middleware
+app.add_middleware(RequestIDMiddleware)
 
 
 def _get_agent_base_url(user: User, settings) -> str:
     """Determine the Agent Zero base URL for a specific user.
 
-    If the user has an active Railway service, route to their dedicated instance.
-    Otherwise, fall back to the shared Agent Zero endpoint.
+    Each user has a dedicated Docker container routed via Traefik.
+    The URL pattern is based on the configured agent domain.
     """
-    if user.railway_service_id:
-        # Construct the Railway service URL for per-user routing
-        # Format: https://{service_id}.railway.app or internal network URL
-        railway_service_url = getattr(settings, 'railway_service_url_template', '')
-        if railway_service_url:
-            return railway_service_url.format(service_id=user.railway_service_id)
+    # Per-user container routing via Traefik path-based routing
+    # Pattern: https://{agent_domain}/agent/{user_id}
+    agent_domain = getattr(settings, 'agent_domain', '')
+    if agent_domain and user.id:
+        return f"https://{agent_domain}/agent/{user.id}"
     return settings.agent_api_url
 
 
 @app.get("/health")
 async def health():
     return {"status": "healthy", "service": "carbon-agent-adapter"}
+
+
+# Metrics endpoint for Prometheus scraping
+app.add_api_route("/metrics", metrics_endpoint, methods=["GET"])
 
 
 @app.get("/v1/models")
@@ -64,7 +71,7 @@ async def chat_completions(
 ):
     """OpenAI-compatible chat completions endpoint.
 
-    Routes requests to user's specific Railway service and
+    Routes requests to user's specific Docker container and
     fakes SSE streaming if client requested it.
     """
     settings = get_settings()
@@ -81,7 +88,7 @@ async def chat_completions(
 
     logger.info("chat_request", user_id=user.id, user_email=user.email, stream=request.stream)
 
-    # Route to user's dedicated Railway service or fallback to shared endpoint
+    # Route to user's dedicated Docker container or fallback to shared endpoint
     base_url = _get_agent_base_url(user, settings)
     client = AgentClient(
         base_url=base_url,
@@ -126,6 +133,5 @@ async def get_user_info(user: User = Depends(verify_api_key)):
         "email": user.email,
         "display_name": user.display_name,
         "status": user.status,
-        "has_service": user.railway_service_id is not None,
-        "has_volume": user.volume_id is not None,
+        "has_service": user.status == UserStatus.ACTIVE,
     }

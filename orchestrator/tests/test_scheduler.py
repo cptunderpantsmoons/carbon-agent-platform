@@ -24,23 +24,21 @@ def mock_user():
         display_name="Test User",
         api_key="test-api-key-123",
         status=UserStatus.ACTIVE,
-        railway_service_id="svc-123",
-        volume_id="vol-123",
+        clerk_user_id="user_test123",
     )
     return user
 
 
 @pytest.fixture
 def mock_user_no_service():
-    """Create a mock user without a service."""
+    """Create a mock user without an active service."""
     user = User(
         id="test-user-2",
         email="test2@example.com",
         display_name="Test User 2",
         api_key="test-api-key-456",
         status=UserStatus.PENDING,
-        railway_service_id=None,
-        volume_id=None,
+        clerk_user_id="user_test456",
     )
     return user
 
@@ -145,15 +143,11 @@ async def test_check_service_health_healthy_services(scheduler, mock_user):
     mock_result.scalars.return_value.all.return_value = [mock_user]
     mock_db.execute.return_value = mock_result
 
-    mock_railway_client = AsyncMock()
-    mock_railway_client.get_service.return_value = {
-        "id": "svc-123",
-        "status": "running",
-        "updatedAt": "2026-04-16T00:00:00Z",
-    }
+    mock_docker = AsyncMock()
+    mock_docker.get_container_status.return_value = "running"
 
     with patch.object(scheduler, "_get_db_session", return_value=mock_db):
-        with patch("app.scheduler.get_railway_client", return_value=mock_railway_client):
+        with patch("app.scheduler.DockerServiceManager", return_value=mock_docker):
             results = await scheduler._check_service_health()
 
             assert results["total_services"] == 1
@@ -170,15 +164,11 @@ async def test_check_service_health_unhealthy_services(scheduler, mock_user):
     mock_result.scalars.return_value.all.return_value = [mock_user]
     mock_db.execute.return_value = mock_result
 
-    mock_railway_client = AsyncMock()
-    mock_railway_client.get_service.return_value = {
-        "id": "svc-123",
-        "status": "stopped",
-        "updatedAt": "2026-04-16T00:00:00Z",
-    }
+    mock_docker = AsyncMock()
+    mock_docker.get_container_status.return_value = "stopped"
 
     with patch.object(scheduler, "_get_db_session", return_value=mock_db):
-        with patch("app.scheduler.get_railway_client", return_value=mock_railway_client):
+        with patch("app.scheduler.DockerServiceManager", return_value=mock_docker):
             results = await scheduler._check_service_health()
 
             assert results["total_services"] == 1
@@ -198,11 +188,11 @@ async def test_check_service_health_unreachable_services(scheduler, mock_user):
     mock_result.scalars.return_value.all.return_value = [mock_user]
     mock_db.execute.return_value = mock_result
 
-    mock_railway_client = AsyncMock()
-    mock_railway_client.get_service.side_effect = Exception("Connection timeout")
+    mock_docker = AsyncMock()
+    mock_docker.get_container_status.side_effect = Exception("Connection timeout")
 
     with patch.object(scheduler, "_get_db_session", return_value=mock_db):
-        with patch("app.scheduler.get_railway_client", return_value=mock_railway_client):
+        with patch("app.scheduler.DockerServiceManager", return_value=mock_docker):
             results = await scheduler._check_service_health()
 
             assert results["total_services"] == 1
@@ -322,7 +312,7 @@ async def test_aggregate_usage_analytics(scheduler, mock_user, mock_user_no_serv
         assert "total_users" in metrics
         assert "active_users" in metrics
         assert "inactive_users" in metrics
-        assert "active_railway_services" in metrics
+        assert "active_containers" in metrics
         assert "total_audit_logs" in metrics
         assert "timestamp" in metrics
 

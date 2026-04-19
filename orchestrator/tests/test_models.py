@@ -60,7 +60,7 @@ async def test_create_session(db_session, sample_user_data, sample_session_data)
     assert result.user_id == "user-001"
     assert result.status == SessionStatus.ACTIVE
     assert result.internal_url == "http://agent-001.internal:8000"
-    assert result.public_url == "https://agent-001.up.railway.app"
+    assert result.public_url == "https://agents.carbon.dev/agent/user-001"
 
 
 @pytest.mark.asyncio
@@ -218,8 +218,6 @@ async def test_user_nullable_fields(db_session):
     await db_session.commit()
 
     result = await db_session.get(User, "user-minimal")
-    assert result.railway_service_id is None
-    assert result.volume_id is None
     assert result.config is None
 
 
@@ -234,7 +232,7 @@ async def test_session_nullable_fields(db_session, sample_user_data):
     await db_session.commit()
 
     result = await db_session.get(Session, "session-min")
-    assert result.railway_deployment_id is None
+    assert result.container_id is None
     assert result.internal_url is None
     assert result.public_url is None
     assert result.started_at is None

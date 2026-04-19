@@ -26,8 +26,6 @@ class User(Base):
     display_name: Mapped[str] = mapped_column(String(255))
     api_key: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     status: Mapped[UserStatus] = mapped_column(Enum(UserStatus), default=UserStatus.PENDING)
-    railway_service_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
-    volume_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     config: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
@@ -45,7 +43,7 @@ class Session(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"))
     status: Mapped[SessionStatus] = mapped_column(Enum(SessionStatus), default=SessionStatus.STOPPED)
-    railway_deployment_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    container_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     internal_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
     public_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

@@ -126,8 +126,6 @@ def test_user(test_db):
         display_name="Existing User",
         api_key="sk-existing-key-123",
         status=UserStatus.ACTIVE,
-        railway_service_id="svc-existing",
-        volume_id="vol-existing",
     )
     test_db.add(user)
     import asyncio

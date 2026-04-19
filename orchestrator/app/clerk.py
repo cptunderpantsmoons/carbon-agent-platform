@@ -291,7 +291,7 @@ async def _handle_user_created(
         get_session_manager().provision_user_background(user_id),
         name=f"provision_{user_id}",
     )
-    logger.info("railway_provision_task_scheduled", user_id=user_id)
+    logger.info("docker_provision_task_scheduled", user_id=user_id)
 
     return {
         "status": "success",
@@ -401,8 +401,8 @@ async def _handle_user_deleted(
             "user_id": user.id,
         }
 
-    # Spin down Railway service if active
-    if user.railway_service_id:
+    # Spin down Docker container if active
+    if user.status == UserStatus.ACTIVE:
         try:
             session_manager = get_session_manager()
             await session_manager.spin_down_user_service(db, user.id)
@@ -421,8 +421,6 @@ async def _handle_user_deleted(
 
     old_status = user.status.value
     user.status = UserStatus.SUSPENDED
-    user.railway_service_id = None
-    user.volume_id = None
 
     await _create_audit_log(
         db,
