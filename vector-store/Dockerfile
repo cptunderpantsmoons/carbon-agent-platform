@@ -1,18 +1,21 @@
-FROM python:3.12-slim
+FROM python:3.12-slim@sha256:804ddf3251a60bbf9c92e73b7566c40428d54d0e79d3428194edf40da6521286
 
 WORKDIR /app
 
+# Install system dependencies (curl for health check, tini for signal handling)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc \
-    g++ \
+    curl \
+    tini \
     && rm -rf /var/lib/apt/lists/*
 
+# Copy requirements first for better layer caching
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Copy application code
 COPY app/ ./app/
 
-# Create a non-root user
+# Create non-root user
 RUN groupadd -r appuser && useradd -r -g appuser -d /app -s /sbin/nologin appuser \
     && chown -R appuser:appuser /app
 
@@ -20,4 +23,12 @@ USER appuser
 
 EXPOSE 8000
 
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
+  CMD curl -f http://localhost:8000/health || exit 1
+
+# Use tini for proper signal handling
+ENTRYPOINT ["/usr/bin/tini", "--"]
+
+# Run application
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

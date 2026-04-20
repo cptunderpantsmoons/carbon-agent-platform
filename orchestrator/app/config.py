@@ -49,6 +49,10 @@ class Settings(BaseSettings):
     clerk_jwt_issuer: str = ""      # e.g. https://xxx.clerk.accounts.dev -- enables iss verification
     clerk_authorized_origins: str = ""  # Comma-separated list of authorized origins
 
+    # RAG gateway
+    rag_fixed_tenant_id: str = ""
+    vector_store_url: str = "http://vector-store:8000"
+
     # CORS
     cors_allowed_origins: str = ""  # Comma-separated. REQUIRED in production.
 

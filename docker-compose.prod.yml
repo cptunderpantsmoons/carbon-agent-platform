@@ -1,0 +1,335 @@
+services:
+  postgres:
+    image: postgres:16-alpine@sha256:caf32b35a1e14d1f56b0b87f4d1f7a8f7c1c8a8a0f9e1d3c6b7a8a1f2e4d7c9
+    container_name: carbon_postgres_prod
+    restart: always
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-carbon_platform}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?error - set POSTGRES_PASSWORD}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
+    networks:
+      - carbon_network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  redis:
+    image: redis:7-alpine@sha256:2a0268d57afdc0cf2188f1a3e8f8f8a1f8e8f8e8f8e8f8e8f8e8f8e8f8e8f8f
+    container_name: carbon_redis_prod
+    restart: always
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:?error - set REDIS_PASSWORD}
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+    networks:
+      - carbon_network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  orchestrator:
+    build:
+      context: ./orchestrator
+      dockerfile: Dockerfile
+    container_name: carbon_orchestrator_prod
+    restart: always
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      # Database
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-carbon_platform}
+      # Redis
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      # Docker
+      DOCKER_NETWORK: carbon_network
+      AGENT_DOCKER_IMAGE: ${AGENT_DOCKER_IMAGE}
+      AGENT_MEMORY_LIMIT: ${AGENT_MEMORY_LIMIT:-512m}
+      AGENT_CPU_NANOS: ${AGENT_CPU_NANOS:-500000000}
+      ADAPTER_PORT: ${ADAPTER_PORT:-8001}
+      # Admin
+      ADMIN_AGENT_API_KEY: ${ADMIN_AGENT_API_KEY:?error - set ADMIN_AGENT_API_KEY}
+      # Session
+      SESSION_IDLE_TIMEOUT_MINUTES: ${SESSION_IDLE_TIMEOUT_MINUTES:-15}
+      SESSION_MAX_LIFETIME_HOURS: ${SESSION_MAX_LIFETIME_HOURS:-24}
+      # Clerk
+      CLERK_SECRET_KEY: ${CLERK_SECRET_KEY:?error - set CLERK_SECRET_KEY}
+      CLERK_PUBLISHABLE_KEY: ${CLERK_PUBLISHABLE_KEY:?error - set CLERK_PUBLISHABLE_KEY}
+      CLERK_WEBHOOK_SECRET: ${CLERK_WEBHOOK_SECRET:?error - set CLERK_WEBHOOK_SECRET}
+      CLERK_JWT_PUBLIC_KEY: ${CLERK_JWT_PUBLIC_KEY:?error - set CLERK_JWT_PUBLIC_KEY}
+      # CORS
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:?error - set CORS_ALLOWED_ORIGINS}
+      # Deployment
+      AUTO_CREATE_TABLES: "false"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
+    networks:
+      - carbon_network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  adapter:
+    build:
+      context: ./adapter
+      dockerfile: Dockerfile
+    container_name: carbon_adapter_prod
+    restart: always
+    ports:
+      - "127.0.0.1:8001:8000"
+    environment:
+      # Database
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-carbon_platform}
+      # Agent Zero
+      AGENT_API_URL: ${AGENT_API_URL:?error - set AGENT_API_URL}
+      AGENT_API_KEY: ${AGENT_API_KEY:?error - set AGENT_API_KEY}
+      # LLM
+      MODEL_NAME: ${MODEL_NAME:-carbon-agent}
+      # Traefik routing
+      AGENT_DOMAIN: ${AGENT_DOMAIN:?error - set AGENT_DOMAIN}
+      # Context store
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/1
+      # Adapter user ID
+      USER_ID: ${ADAPTER_USER_ID:-}
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
+    networks:
+      - carbon_network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  chromadb:
+    image: ghcr.io/chroma-core/chroma:latest@sha256:c7c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8
+    container_name: carbon_chromadb_prod
+    restart: always
+    ports:
+      - "127.0.0.1:8002:8000"
+    environment:
+      IS_PERSISTENT: "TRUE"
+      PERSIST_DIRECTORY: /chroma/chroma_db
+      ANONYMIZED_TELEMETRY: "FALSE"
+    volumes:
+      - vector_data:/chroma/chroma_db
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/api/v1/heartbeat || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 1G
+    networks:
+      - carbon_network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  vector-store:
+    build:
+      context: ./vector-store
+      dockerfile: Dockerfile
+    container_name: carbon_vector_store_prod
+    restart: always
+    ports:
+      - "127.0.0.1:8003:8000"
+    environment:
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-all-MiniLM-L6-v2}
+      CHROMA_HOST: chromadb
+      CHROMA_PORT: 8000
+      COLLECTION_NAME: ${VECTOR_COLLECTION_NAME:-carbon_documents}
+    depends_on:
+      chromadb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 1G
+    networks:
+      - carbon_network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  open-webui:
+    build:
+      context: ./open-webui
+      dockerfile: Dockerfile
+    container_name: carbon_webui_prod
+    restart: always
+    ports:
+      - "127.0.0.1:3000:8080"
+    environment:
+      # OpenAI/Adapter Configuration
+      OPENAI_API_BASE_URL: http://adapter:8000/v1
+      OPENAI_API_KEY: ${OPENWEBUI_API_KEY:?error - set OPENWEBUI_API_KEY}
+      WEBUI_SECRET_KEY: ${WEBUI_SECRET:?error - set WEBUI_SECRET}
+      # Clerk Integration
+      CLERK_ENABLED: "true"
+      CLERK_PUBLISHABLE_KEY: ${CLERK_PUBLISHABLE_KEY:?error - set CLERK_PUBLISHABLE_KEY}
+      CLERK_SECRET_KEY: ${CLERK_SECRET_KEY:?error - set CLERK_SECRET_KEY}
+      CLERK_FRONTEND_API_URL: ${CLERK_FRONTEND_API_URL:?error - set CLERK_FRONTEND_API_URL}
+      # Orchestrator Integration
+      ORCHESTRATOR_URL: http://orchestrator:8000
+      ADAPTER_URL: http://adapter:8000
+      # Feature Flags
+      ENABLE_SIGNUP: "false"
+      WEBUI_AUTH: "true"
+      DEFAULT_USER_ROLE: user
+      # CORS & Network
+      CORS_ALLOW_ORIGIN: ${WEBUI_CORS_ORIGIN:?error - set WEBUI_CORS_ORIGIN}
+      REQUEST_TIMEOUT_SECONDS: 120
+      MAX_CONCURRENT_REQUESTS: 10
+    depends_on:
+      adapter:
+        condition: service_healthy
+      orchestrator:
+        condition: service_healthy
+      chromadb:
+        condition: service_healthy
+    volumes:
+      - openwebui:/app/backend/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 1G
+    networks:
+      - carbon_network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  dashboard:
+    build:
+      context: ../carbon-agent-dashboard
+      dockerfile: Dockerfile
+    container_name: carbon_dashboard_prod
+    restart: always
+    ports:
+      - "127.0.0.1:3001:3000"
+    environment:
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${CLERK_PUBLISHABLE_KEY:?error - set CLERK_PUBLISHABLE_KEY}
+      CLERK_SECRET_KEY: ${CLERK_SECRET_KEY:?error - set CLERK_SECRET_KEY}
+    depends_on:
+      - orchestrator
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3000 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+    networks:
+      - carbon_network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  pgdata:
+  redis_data:
+  openwebui:
+  vector_data:
+
+networks:
+  carbon_network:
+    driver: bridge

@@ -1,6 +1,7 @@
 """Clerk JWT authentication middleware."""
 import time
 from collections.abc import Mapping
+from typing import Any, TypedDict
 
 import httpx
 import jwt
@@ -20,6 +21,14 @@ logger = structlog.get_logger(__name__)
 # Cache for Clerk public keys with expiry
 _clerk_public_keys: dict[str, tuple[str, float]] = {}
 _PUBLIC_KEY_CACHE_TTL = 3600  # 1 hour
+
+
+class ClerkPrincipal(TypedDict):
+    """JWT principal extracted from a valid Clerk token."""
+
+    clerk_user_id: str
+    carbon_user_status: str | None
+    claims: dict[str, Any]
 
 
 def get_clerk_jwks_for_verification() -> dict | None:
@@ -103,6 +112,29 @@ def _resolve_test_jwks_key(jwks_override: Mapping[str, object], key_id: str | No
     raise HTTPException(status_code=401, detail="Invalid token: unknown key ID")
 
 
+def _extract_bearer_token(authorization: str) -> str:
+    """Extract the raw JWT from an Authorization header."""
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Missing Authorization header")
+
+    if not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Invalid Authorization header format")
+
+    return authorization[7:]
+
+
+def _validate_authorized_party(payload: dict[str, Any]) -> None:
+    """Validate the Clerk ``azp`` claim against configured authorized origins."""
+    settings = get_settings()
+    allowed_origins = [o.strip() for o in settings.clerk_authorized_origins.split(",") if o.strip()]
+    if not allowed_origins:
+        return
+
+    azp = payload.get("azp")
+    if not isinstance(azp, str) or azp not in allowed_origins:
+        raise HTTPException(status_code=401, detail="Invalid token: authorized party mismatch")
+
+
 async def verify_clerk_token(
     token: str,
     jwks_override: Mapping[str, object] | None = None,
@@ -152,7 +184,7 @@ async def verify_clerk_token(
         decode_kwargs["issuer"] = settings.clerk_jwt_issuer
 
     try:
-        return jwt.decode(token, public_key, **decode_kwargs)
+        payload = jwt.decode(token, public_key, **decode_kwargs)
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token has expired")
     except jwt.InvalidIssuerError:
@@ -162,9 +194,12 @@ async def verify_clerk_token(
         logger.warning("clerk_jwt_invalid", error=str(e))
         raise HTTPException(status_code=401, detail=f"Invalid token: {str(e)}")
 
+    _validate_authorized_party(payload)
+    return payload
+
 
 async def verify_clerk_jwt(
-    authorization: str = Header(...),
+    authorization: str = Header(default=""),
     db: AsyncSession = Depends(get_session),
     jwks_override: dict | None = Depends(get_clerk_jwks_for_verification),
 ) -> User:
@@ -184,14 +219,7 @@ async def verify_clerk_jwt(
     Raises:
         HTTPException: If authentication or authorisation fails.
     """
-    if not authorization:
-        raise HTTPException(status_code=401, detail="Missing Authorization header")
-
-    if not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Invalid Authorization header format")
-
-    token = authorization[7:]
-
+    token = _extract_bearer_token(authorization)
     payload = await verify_clerk_token(token, jwks_override=jwks_override)
 
     clerk_user_id = payload.get("sub") or payload.get("user_id")
@@ -218,3 +246,44 @@ async def verify_clerk_jwt(
         raise HTTPException(status_code=403, detail="User account is not active")
 
     return user
+
+
+async def verify_clerk_principal(
+    authorization: str = Header(default=""),
+    db: AsyncSession = Depends(get_session),
+    jwks_override: dict | None = Depends(get_clerk_jwks_for_verification),
+) -> ClerkPrincipal:
+    """FastAPI dependency: verify Clerk JWT and return its principal claims.
+
+    Unlike ``verify_clerk_jwt``, this dependency does not look up a Carbon
+    platform user row. It is intended for principals that are identified only by
+    their Clerk subject plus a scoped tenant id.
+    """
+    token = _extract_bearer_token(authorization)
+    payload = await verify_clerk_token(token, jwks_override=jwks_override)
+
+    clerk_user_id = payload.get("sub") or payload.get("user_id")
+    if not clerk_user_id:
+        raise HTTPException(status_code=401, detail="Invalid token: missing user ID")
+
+    carbon_user_status: str | None = None
+    result = await db.execute(select(User).where(User.clerk_user_id == clerk_user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        # Email fallback: links tokens for users provisioned before Clerk signup
+        email = payload.get("email") or payload.get("email_address")
+        if email:
+            result = await db.execute(select(User).where(User.email == email))
+            user = result.scalar_one_or_none()
+            if user and not user.clerk_user_id:
+                user.clerk_user_id = clerk_user_id
+                await db.commit()
+
+    if user:
+        carbon_user_status = user.status.value
+
+    return {
+        "clerk_user_id": str(clerk_user_id),
+        "carbon_user_status": carbon_user_status,
+        "claims": payload,
+    }

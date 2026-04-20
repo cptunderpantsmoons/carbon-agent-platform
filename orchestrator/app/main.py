@@ -13,6 +13,7 @@ from app.admin_ui import admin_ui_router
 from app.users import user_router
 from app.clerk import clerk_webhook_router
 from app.auth_routes import auth_router
+from app.rag import ClerkRAGIdentityMiddleware, rag_router
 from app.session_manager import get_session_manager
 from app.scheduler import get_scheduler
 from app.api_key_injection import ApiKeyInjectionMiddleware
@@ -55,7 +56,9 @@ def _validate_production_config() -> None:
         "clerk_publishable_key":   "CLERK_PUBLISHABLE_KEY",
         "clerk_frontend_api_url":  "CLERK_FRONTEND_API_URL",
         "clerk_webhook_secret":    "CLERK_WEBHOOK_SECRET",
+        "clerk_jwt_issuer":        "CLERK_JWT_ISSUER",
         "database_url":            "DATABASE_URL",
+        "rag_fixed_tenant_id":      "RAG_FIXED_TENANT_ID",
     }
     for attr, env_name in required.items():
         val = getattr(s, attr, "")
@@ -151,6 +154,9 @@ app.add_middleware(DBSessionMiddleware)
 # API key injection for adapter-bound requests
 app.add_middleware(ApiKeyInjectionMiddleware)
 
+# Clerk identity propagation for RAG rate limiting must happen before SlowAPI.
+app.add_middleware(ClerkRAGIdentityMiddleware)
+
 # Rate limiting
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
@@ -162,6 +168,7 @@ app.include_router(admin_ui_router)
 app.include_router(user_router)
 app.include_router(auth_router)
 app.include_router(clerk_webhook_router)
+app.include_router(rag_router)
 
 
 @app.get("/health")
