@@ -1,21 +1,20 @@
 services:
-  networks:
-    default:
-      aliases:
-        - postgres
 
   postgres:
     image: postgres:16-alpine
     environment:
       POSTGRES_DB: carbon_platform
-      POSTGRES_USER: postgres
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    networks:
+      - carbon-agent-net
+    restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -24,17 +23,16 @@ services:
         limits:
           memory: 512M
 
-  networks:
-    default:
-      aliases:
-        - redis
-
   redis:
     image: redis:7-alpine
+    command: redis-server --appendonly yes
     ports:
       - "${REDIS_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
+    networks:
+      - carbon-agent-net
+    restart: unless-stopped
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -45,11 +43,6 @@ services:
         limits:
           memory: 256M
 
-  networks:
-    default:
-      aliases:
-        - orchestrator
-
   orchestrator:
     build:
       context: ./orchestrator
@@ -57,41 +50,39 @@ services:
     ports:
       - "${ORCHESTRATOR_PORT:-8000}:8000"
     environment:
-      # Database
       DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/carbon_platform}
-      # Redis
       REDIS_URL: redis://redis:6379/0
-      # Docker (self-hosted PaaS)
+      RATE_LIMIT_STORAGE_URI: redis://redis:6379/0
       DOCKER_NETWORK: carbon-agent-net
       AGENT_DOCKER_IMAGE: ${AGENT_DOCKER_IMAGE:-carbon-agent-adapter:latest}
       AGENT_MEMORY_LIMIT: ${AGENT_MEMORY_LIMIT:-512m}
       AGENT_CPU_NANOS: ${AGENT_CPU_NANOS:-500000000}
       ADAPTER_PORT: ${ADAPTER_PORT:-8001}
-      # Traefik (reverse proxy)
-      AGENT_DOMAIN: ""
+      AGENT_DOMAIN: ${AGENT_DOMAIN:-}
       TRAEFIK_ENTRYPOINT: ${TRAEFIK_ENTRYPOINT:-websecure}
       AGENT_BASE_PATH: ${AGENT_BASE_PATH:-/agent}
-      # Admin
       ADMIN_AGENT_API_KEY: ${ADMIN_AGENT_API_KEY:-dev-admin-key}
-      # Session
       SESSION_IDLE_TIMEOUT_MINUTES: ${SESSION_IDLE_TIMEOUT_MINUTES:-15}
       SESSION_MAX_LIFETIME_HOURS: ${SESSION_MAX_LIFETIME_HOURS:-24}
-      # Clerk Authentication
+      SESSION_SPINUP_TIMEOUT_SECONDS: ${SESSION_SPINUP_TIMEOUT_SECONDS:-120}
       CLERK_SECRET_KEY: ${CLERK_SECRET_KEY:-}
       CLERK_PUBLISHABLE_KEY: ${CLERK_PUBLISHABLE_KEY:-}
       CLERK_WEBHOOK_SECRET: ${CLERK_WEBHOOK_SECRET:-}
       CLERK_JWT_PUBLIC_KEY: ${CLERK_JWT_PUBLIC_KEY:-}
-      # CORS
+      CLERK_FRONTEND_API_URL: ${CLERK_FRONTEND_API_URL:-}
+      CLERK_JWT_ISSUER: ${CLERK_JWT_ISSUER:-}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:8000}
-      # Deployment — disable auto-create in compose; Alembic handles migrations
-      AUTO_CREATE_TABLES: "true"
+      AUTO_CREATE_TABLES: ${AUTO_CREATE_TABLES:-true}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - carbon-agent-net
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+    restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
       interval: 30s
@@ -102,11 +93,6 @@ services:
       resources:
         limits:
           memory: 512M
-
-  networks:
-    default:
-      aliases:
-        - adapter
 
   adapter:
     build:
@@ -115,22 +101,21 @@ services:
     ports:
       - "${ADAPTER_PORT:-8001}:8000"
     environment:
-      # Database (shared with orchestrator)
-      DATABASE_URL: sqlite+aiosqlite:///./adapter.db
-      # Agent Zero
-      AGENT_API_URL: http://localhost:5000
+      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/carbon_platform}
+      AGENT_API_URL: ${AGENT_API_URL:-http://localhost:5000}
       AGENT_API_KEY: ${AGENT_API_KEY:-}
-      # LLM
       MODEL_NAME: ${MODEL_NAME:-carbon-agent}
-      # Per-user container routing via Traefik
-      AGENT_DOMAIN: ${AGENT_DOMAIN:-agents.carbon.dev}
-      # Context store (Redis-backed for multi-replica deployments)
+      AGENT_DOMAIN: ${AGENT_DOMAIN:-}
       REDIS_URL: redis://redis:6379/1
-      # Adapter user ID (for standalone mode)
       USER_ID: ${ADAPTER_USER_ID:-}
+    networks:
+      - carbon-agent-net
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
       interval: 30s
@@ -142,124 +127,52 @@ services:
         limits:
           memory: 512M
 
-  networks:
-    default:
-      aliases:
-        - chromadb
-
-  chromadb:
-    image: ghcr.io/chroma-core/chroma:latest
-    ports:
-      - "${CHROMADB_PORT:-8002}:8000"
-    environment:
-      IS_PERSISTENT: "TRUE"
-      PERSIST_DIRECTORY: /chroma/chroma_db
-      ANONYMIZED_TELEMETRY: "FALSE"
-    volumes:
-      - vector_data:/chroma/chroma_db
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8000/api/v1/heartbeat || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    deploy:
-      resources:
-        limits:
-          memory: 1G
-
-  networks:
-    default:
-      aliases:
-        - vector-store
-
-  vector-store:
-    build:
-      context: ./vector-store
-      dockerfile: Dockerfile
-    ports:
-      - "${VECTOR_STORE_PORT:-8003}:8000"
-    environment:
-      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-all-MiniLM-L6-v2}
-      CHROMA_HOST: chromadb
-      CHROMA_PORT: 8000
-      COLLECTION_NAME: ${VECTOR_COLLECTION_NAME:-carbon_documents}
-    depends_on:
-      - chromadb
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    deploy:
-      resources:
-        limits:
-          memory: 1G
-
-  networks:
-    default:
-      aliases:
-        - webui
-
   open-webui:
     build:
       context: ./open-webui
       dockerfile: Dockerfile
-    depends_on:
-      - webui
     ports:
       - "${WEBUI_PORT:-3000}:8080"
     environment:
-      # OpenAI/Adapter Configuration
       OPENAI_API_BASE_URL: http://adapter:8000/v1
       OPENAI_API_KEY: ${OPENWEBUI_API_KEY:-sk-dev-test-key}
       WEBUI_SECRET_KEY: ${WEBUI_SECRET:-dev-secret}
-
-      # Clerk Integration
-      CLERK_ENABLED: ${OPENWEBUI_CLERK_ENABLED:-true}
+      CLERK_ENABLED: ${OPENWEBUI_CLERK_ENABLED:-false}
       CLERK_PUBLISHABLE_KEY: ${CLERK_PUBLISHABLE_KEY:-}
       CLERK_SECRET_KEY: ${CLERK_SECRET_KEY:-}
       CLERK_FRONTEND_API_URL: ${CLERK_FRONTEND_API_URL:-}
-
-      # Orchestrator Integration
       ORCHESTRATOR_URL: http://orchestrator:8000
       ADAPTER_URL: http://adapter:8000
-
-      # Feature Flags
       ENABLE_SIGNUP: "false"
       WEBUI_AUTH: "true"
       DEFAULT_USER_ROLE: user
-
-      # CORS & Network
       CORS_ALLOW_ORIGIN: "*"
-      REQUEST_TIMEOUT_SECONDS: 120
-      MAX_CONCURRENT_REQUESTS: 10
-
+    networks:
+      - carbon-agent-net
     depends_on:
-      - adapter
-      - orchestrator
-      - chromadb
+      adapter:
+        condition: service_healthy
+      orchestrator:
+        condition: service_healthy
     volumes:
       - openwebui:/app/backend/data
+    restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8080/health || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 60s
     deploy:
       resources:
         limits:
           memory: 2G
-    networks:
-      default:
-        aliases:
-          - open-webui
 
 volumes:
   pgdata:
   redis_data:
   openwebui:
-  vector_data:
 
 networks:
-  default:
-    name: carbon_platform_network
+  carbon-agent-net:
+    external: true
