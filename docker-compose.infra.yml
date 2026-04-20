@@ -5,8 +5,6 @@
 #   docker network create carbon-agent-net
 #   docker compose -f docker-compose.infra.yml up -d
 
-version: "3.8"
-
 services:
   # Reverse Proxy & SSL Manager (Traefik v3)
   traefik:
@@ -90,5 +88,4 @@ volumes:
 
 networks:
   carbon-agent-net:
-    name: carbon-agent-net
-    driver: bridge
+    external: true
