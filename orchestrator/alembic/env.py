@@ -1,4 +1,5 @@
 """Alembic env.py — async-aware migration runner for the orchestrator."""
+
 import os
 import asyncio
 from logging.config import fileConfig
@@ -37,6 +38,7 @@ def _get_database_url() -> str:
     # Fallback: read from app settings
     try:
         from app.config import get_settings
+
         url = get_settings().database_url
         if url.startswith("postgresql://"):
             url = url.replace("postgresql://", "postgresql+asyncpg://", 1)

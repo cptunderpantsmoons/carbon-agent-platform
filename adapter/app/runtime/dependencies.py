@@ -4,6 +4,7 @@ These are injected into agent runs via RunContext so every tool,
 callback, and model call has access to user, tenant, policy,
 tool registry, and observability context.
 """
+
 from dataclasses import dataclass
 from typing import Optional
 import structlog
@@ -82,7 +83,9 @@ class RuntimeDeps:
     conversation_id: Optional[str] = None
 
     @classmethod
-    def from_request(cls, request, trace_id: str = "", request_id: str = "") -> "RuntimeDeps":
+    def from_request(
+        cls, request, trace_id: str = "", request_id: str = ""
+    ) -> "RuntimeDeps":
         """Build RuntimeDeps from an AgentExecutionRequest."""
         settings = get_settings()
         return cls(

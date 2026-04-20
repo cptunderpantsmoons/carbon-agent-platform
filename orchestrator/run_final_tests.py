@@ -1,18 +1,21 @@
 #!/usr/bin/env python
 """Run tests with output captured."""
+
 import subprocess
 import sys
 import os
 
 # Change to the orchestrator directory
-os.chdir(r"c:\Users\MoonBuggy\Documents\carbon agent v2 rail\carbon-agent-platform\orchestrator")
+os.chdir(
+    r"c:\Users\MoonBuggy\Documents\carbon agent v2 rail\carbon-agent-platform\orchestrator"
+)
 
 # Run pytest with subprocess
 result = subprocess.run(
     [sys.executable, "-m", "pytest", "tests/", "-v", "--tb=short", "-x"],
     capture_output=True,
     text=True,
-    timeout=300
+    timeout=300,
 )
 
 # Write to file

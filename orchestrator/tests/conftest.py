@@ -1,8 +1,8 @@
 """Shared test fixtures."""
+
 import pytest
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from app.database import Base
-from app.models import User
 
 
 @pytest.fixture

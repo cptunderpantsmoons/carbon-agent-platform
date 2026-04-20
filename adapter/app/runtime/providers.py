@@ -5,6 +5,7 @@ Supports:
 - OpenAI-compatible (Featherless, DeepSeek via base_url)
 - Anthropic (via pydantic-ai AnthropicModel)
 """
+
 from typing import Optional
 import structlog
 
@@ -19,8 +20,14 @@ logger = structlog.get_logger()
 # Provider endpoint registry
 _PROVIDER_ENDPOINTS = {
     "openai": {"base_url": None, "default_model": "gpt-4o"},
-    "featherless": {"base_url": "https://api.featherless.ai/v1", "default_model": "meta-llama-3.1-70b-instruct"},
-    "deepseek": {"base_url": "https://api.deepseek.com/v1", "default_model": "deepseek-chat"},
+    "featherless": {
+        "base_url": "https://api.featherless.ai/v1",
+        "default_model": "meta-llama-3.1-70b-instruct",
+    },
+    "deepseek": {
+        "base_url": "https://api.deepseek.com/v1",
+        "default_model": "deepseek-chat",
+    },
     "anthropic": {"base_url": None, "default_model": "claude-3-sonnet-20240229"},
 }
 
@@ -38,7 +45,9 @@ def resolve_model_name(provider: str, requested_model: Optional[str] = None) -> 
         p = "openai"
     config = _PROVIDER_ENDPOINTS.get(p)
     if config is None:
-        raise ValueError(f"Unsupported provider: {p}. Supported: {list(_PROVIDER_ENDPOINTS.keys())}")
+        raise ValueError(
+            f"Unsupported provider: {p}. Supported: {list(_PROVIDER_ENDPOINTS.keys())}"
+        )
 
     if requested_model and requested_model != "carbon-agent":
         return requested_model
@@ -98,7 +107,9 @@ def get_provider_model(
 
     config = _PROVIDER_ENDPOINTS.get(p)
     if config is None:
-        raise ValueError(f"Unsupported provider: {p}. Supported: {list(_PROVIDER_ENDPOINTS.keys())}")
+        raise ValueError(
+            f"Unsupported provider: {p}. Supported: {list(_PROVIDER_ENDPOINTS.keys())}"
+        )
 
     m = resolve_model_name(p, model)
     key = api_key or settings.llm_api_key or ""
@@ -140,7 +151,9 @@ def resolve_provider_from_policy(
         for pp in premium_providers:
             if pp in allowed_providers:
                 return pp
-        raise ValueError("Model policy requires a premium provider, but none are allowed")
+        raise ValueError(
+            "Model policy requires a premium provider, but none are allowed"
+        )
 
     if routing_mode == "block_premium":
         # Reject premium, fall back to non-premium
@@ -148,8 +161,12 @@ def resolve_provider_from_policy(
             requested_provider = None
         non_premium = [p for p in allowed_providers if p not in premium_providers]
         if not non_premium:
-            raise ValueError("Model policy blocks premium providers, but no non-premium providers are allowed")
-        return requested_provider if requested_provider in non_premium else non_premium[0]
+            raise ValueError(
+                "Model policy blocks premium providers, but no non-premium providers are allowed"
+            )
+        return (
+            requested_provider if requested_provider in non_premium else non_premium[0]
+        )
 
     # Auto mode: respect request if allowed, else policy default
     if requested_provider and requested_provider in allowed_providers:

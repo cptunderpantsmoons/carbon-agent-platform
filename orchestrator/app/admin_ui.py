@@ -1,4 +1,5 @@
 """Admin UI page served as inline HTML."""
+
 from fastapi import APIRouter
 from fastapi.responses import HTMLResponse
 
@@ -678,14 +679,13 @@ window.addEventListener('load', async () => {
 async def admin_dashboard():
     """Serve the admin dashboard HTML page."""
     settings = get_settings()
-    
+
     # Substitute Clerk configuration into the HTML template
     html_content = ADMIN_HTML.replace(
-        "{{CLERK_PUBLISHABLE_KEY}}", 
-        settings.clerk_publishable_key or ""
+        "{{CLERK_PUBLISHABLE_KEY}}", settings.clerk_publishable_key or ""
     ).replace(
         "{{CLERK_FRONTEND_API_URL}}",
-        settings.clerk_frontend_api_url or "https://api.clerk.com"
+        settings.clerk_frontend_api_url or "https://api.clerk.com",
     )
-    
+
     return HTMLResponse(content=html_content)

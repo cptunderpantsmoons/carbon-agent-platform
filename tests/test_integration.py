@@ -1,7 +1,7 @@
 """End-to-end integration tests for the platform."""
+
 import os
 import sys
-import pytest
 from unittest.mock import AsyncMock, patch
 from fastapi.testclient import TestClient
 
@@ -25,6 +25,7 @@ class TestAdapterFlow:
     def test_health_endpoint(self):
         _use_adapter()
         from app.main import app
+
         client = TestClient(app)
         resp = client.get("/health")
         assert resp.status_code == 200
@@ -33,6 +34,7 @@ class TestAdapterFlow:
     def test_models_endpoint(self):
         _use_adapter()
         from app.main import app
+
         client = TestClient(app)
         resp = client.get("/v1/models")
         assert resp.status_code == 200
@@ -42,6 +44,7 @@ class TestAdapterFlow:
     def test_chat_completions_non_streaming(self):
         _use_adapter()
         from app.main import app
+
         with patch("app.main.AgentClient") as MockClient:
             mock = AsyncMock()
             mock.send_message.return_value = "Test response"
@@ -49,7 +52,11 @@ class TestAdapterFlow:
             client = TestClient(app)
             resp = client.post(
                 "/v1/chat/completions",
-                json={"model": "carbon-agent", "messages": [{"role": "user", "content": "Hello"}], "stream": False},
+                json={
+                    "model": "carbon-agent",
+                    "messages": [{"role": "user", "content": "Hello"}],
+                    "stream": False,
+                },
             )
             assert resp.status_code == 200
             assert resp.json()["choices"][0]["message"]["content"] == "Test response"
@@ -57,6 +64,7 @@ class TestAdapterFlow:
     def test_chat_completions_fake_stream(self):
         _use_adapter()
         from app.main import app
+
         with patch("app.main.AgentClient") as MockClient:
             mock = AsyncMock()
             mock.send_message.return_value = "Hello world"
@@ -64,7 +72,11 @@ class TestAdapterFlow:
             client = TestClient(app)
             resp = client.post(
                 "/v1/chat/completions",
-                json={"model": "carbon-agent", "messages": [{"role": "user", "content": "Hello"}], "stream": True},
+                json={
+                    "model": "carbon-agent",
+                    "messages": [{"role": "user", "content": "Hello"}],
+                    "stream": True,
+                },
             )
             assert resp.status_code == 200
             assert "data: [DONE]" in resp.text

@@ -1,4 +1,5 @@
 """Tests for model policy endpoints and ORM logic."""
+
 from fastapi.testclient import TestClient
 from unittest.mock import patch, MagicMock
 import pytest
@@ -82,7 +83,9 @@ async def test_model_policy_orm_fields(db_session):
     db_session.add(policy)
     await db_session.commit()
 
-    result = await db_session.execute(select(ModelPolicy).where(ModelPolicy.tenant_id == "tenant-a"))
+    result = await db_session.execute(
+        select(ModelPolicy).where(ModelPolicy.tenant_id == "tenant-a")
+    )
     fetched = result.scalar_one()
     assert fetched.routing_mode == "force_premium"
     assert fetched.default_provider == "openai"

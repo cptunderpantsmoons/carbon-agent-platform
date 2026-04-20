@@ -1,4 +1,5 @@
 """HTTP client to communicate with Agent Zero's REST API."""
+
 import httpx
 import structlog
 from app.config import get_settings
@@ -42,7 +43,9 @@ class AgentClient:
 
         # Look up context_id from Redis-backed store
         context_store = get_context_store()
-        context_id = await context_store.get(effective_user_id) if effective_user_id else None
+        context_id = (
+            await context_store.get(effective_user_id) if effective_user_id else None
+        )
 
         payload = {
             "message": message,

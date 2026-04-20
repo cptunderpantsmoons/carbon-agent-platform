@@ -1,4 +1,5 @@
 """Tests for OpenAI-compatible schemas."""
+
 from app.schemas import (
     ChatCompletionRequest,
     ChatCompletionResponse,

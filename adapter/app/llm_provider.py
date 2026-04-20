@@ -9,7 +9,7 @@ Supports multiple LLM backends with a unified interface:
 
 All providers implement the same interface for seamless swapping.
 """
-import os
+
 from abc import ABC, abstractmethod
 from typing import Optional
 
@@ -102,7 +102,9 @@ class AgentZeroProvider(LLMProvider):
 class OpenAIProvider(LLMProvider):
     """OpenAI API provider."""
 
-    def __init__(self, api_key: str, model: str = "gpt-4o", base_url: Optional[str] = None):
+    def __init__(
+        self, api_key: str, model: str = "gpt-4o", base_url: Optional[str] = None
+    ):
         self.model = model
         self.client = AsyncOpenAI(
             api_key=api_key,
@@ -274,10 +276,12 @@ class AnthropicProvider(LLMProvider):
             if msg["role"] == "system":
                 system_prompt = msg["content"]
             elif msg["role"] in ["user", "assistant"]:
-                anthropic_messages.append({
-                    "role": msg["role"],
-                    "content": msg["content"],
-                })
+                anthropic_messages.append(
+                    {
+                        "role": msg["role"],
+                        "content": msg["content"],
+                    }
+                )
 
         payload = {
             "model": self.model,

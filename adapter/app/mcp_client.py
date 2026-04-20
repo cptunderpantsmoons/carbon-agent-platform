@@ -17,7 +17,6 @@ from dataclasses import dataclass
 import httpx
 import structlog
 
-from app.config import get_settings
 
 logger = structlog.get_logger()
 
@@ -25,6 +24,7 @@ logger = structlog.get_logger()
 @dataclass
 class MCPTool:
     """Represents an available MCP tool."""
+
     name: str
     description: str
     parameters: dict[str, Any]
@@ -32,25 +32,28 @@ class MCPTool:
 
 class MCPError(Exception):
     """Base exception for MCP client errors."""
+
     pass
 
 
 class MCPTimeoutError(MCPError):
     """Raised when an MCP operation times out."""
+
     pass
 
 
 class MCPConnectionError(MCPError):
     """Raised when unable to connect to MCP gateway."""
+
     pass
 
 
 class MCPClient:
     """Async client for obot MCP gateway.
-    
+
     Supports tool discovery and execution with configurable timeouts,
     connection pooling, and graceful degradation when MCP is disabled.
-    
+
     Usage:
         client = get_mcp_client()
         tools = await client.list_tools()
@@ -68,7 +71,7 @@ class MCPClient:
         self._base_url = base_url or "http://obot-gateway:8080"
         self._timeout = timeout_seconds or 30.0
         self._max_retries = max_retries or 3
-        
+
         # Lazy initialization — client created on first use
         self._client: Optional[httpx.AsyncClient] = None
 
@@ -96,16 +99,16 @@ class MCPClient:
 
     async def health_check(self) -> dict[str, Any]:
         """Check if MCP gateway is reachable and healthy.
-        
+
         Returns:
             Health status dict with "status" key ("healthy", "degraded", "unavailable").
-            
+
         Raises:
             MCPConnectionError: If gateway is unreachable (only if MCP enabled).
         """
         if not self._enabled:
             return {"status": "disabled", "message": "MCP is disabled in configuration"}
-        
+
         client = self._get_client()
         try:
             response = await client.get("/health", timeout=5.0)
@@ -116,9 +119,13 @@ class MCPClient:
             logger.warning("mcp_health_check_timeout", base_url=self._base_url)
             return {"status": "degraded", "message": "Health check timed out"}
         except httpx.ConnectError as e:
-            logger.error("mcp_health_check_failed", error=str(e), base_url=self._base_url)
+            logger.error(
+                "mcp_health_check_failed", error=str(e), base_url=self._base_url
+            )
             if self._enabled:
-                raise MCPConnectionError(f"Cannot connect to MCP gateway at {self._base_url}") from e
+                raise MCPConnectionError(
+                    f"Cannot connect to MCP gateway at {self._base_url}"
+                ) from e
             return {"status": "unavailable", "message": str(e)}
         except httpx.HTTPStatusError as e:
             logger.error("mcp_health_check_error", status=e.response.status_code)
@@ -126,43 +133,43 @@ class MCPClient:
 
     async def list_tools(self) -> list[MCPTool]:
         """List available MCP tools from the gateway registry.
-        
+
         Returns:
             List of available tools. Empty list if MCP disabled or unavailable.
         """
         if not self._enabled:
             return []
-        
+
         client = self._get_client()
-        
+
         for attempt in range(self._max_retries):
             try:
                 response = await client.get("/api/tools")
                 response.raise_for_status()
                 data = response.json()
-                
+
                 tools = [
                     MCPTool(
                         name=t["name"],
                         description=t.get("description", ""),
-                        parameters=t.get("parameters", {})
+                        parameters=t.get("parameters", {}),
                     )
                     for t in data.get("tools", [])
                 ]
-                
+
                 logger.info("mcp_tools_listed", count=len(tools))
                 return tools
-                
+
             except httpx.TimeoutException:
                 logger.warning("mcp_list_tools_timeout", attempt=attempt + 1)
                 if attempt == self._max_retries - 1:
                     return []
                 await asyncio.sleep(0.5 * (attempt + 1))  # Exponential backoff
-                
+
             except httpx.HTTPError as e:
                 logger.error("mcp_list_tools_error", error=str(e))
                 return []
-        
+
         return []
 
     async def call_tool(
@@ -172,29 +179,29 @@ class MCPClient:
         user_id: Optional[str] = None,
     ) -> dict[str, Any]:
         """Call an MCP tool via the gateway.
-        
+
         Args:
             tool_name: Name of the tool to call (e.g., "browser_search").
             params: Tool-specific parameters.
             user_id: Optional user ID for audit logging and rate limiting.
-            
+
         Returns:
             Tool execution result with "success" and "result" keys.
-            
+
         Raises:
             MCPTimeoutError: If tool execution times out.
             MCPError: For other MCP-related errors.
         """
         if not self._enabled:
             raise MCPError("MCP is disabled in configuration")
-        
+
         client = self._get_client()
         headers = {}
         if user_id:
             headers["X-User-ID"] = user_id
-        
+
         logger.info("mcp_tool_call_start", tool=tool_name, user_id=user_id)
-        
+
         try:
             response = await client.post(
                 f"/api/tools/{tool_name}",
@@ -203,7 +210,7 @@ class MCPClient:
             )
             response.raise_for_status()
             result = response.json()
-            
+
             logger.info(
                 "mcp_tool_call_success",
                 tool=tool_name,
@@ -211,11 +218,13 @@ class MCPClient:
                 success=result.get("success", False),
             )
             return result
-            
+
         except httpx.TimeoutException as e:
             logger.error("mcp_tool_call_timeout", tool=tool_name, timeout=self._timeout)
-            raise MCPTimeoutError(f"Tool '{tool_name}' timed out after {self._timeout}s") from e
-            
+            raise MCPTimeoutError(
+                f"Tool '{tool_name}' timed out after {self._timeout}s"
+            ) from e
+
         except httpx.HTTPStatusError as e:
             logger.error(
                 "mcp_tool_call_http_error",
@@ -223,11 +232,15 @@ class MCPClient:
                 status=e.response.status_code,
                 response=e.response.text[:200],
             )
-            raise MCPError(f"Tool '{tool_name}' failed: HTTP {e.response.status_code}") from e
-            
+            raise MCPError(
+                f"Tool '{tool_name}' failed: HTTP {e.response.status_code}"
+            ) from e
+
         except httpx.HTTPError as e:
             logger.error("mcp_tool_call_error", tool=tool_name, error=str(e))
-            raise MCPConnectionError(f"Failed to call tool '{tool_name}': {str(e)}") from e
+            raise MCPConnectionError(
+                f"Failed to call tool '{tool_name}': {str(e)}"
+            ) from e
 
     async def close(self) -> None:
         """Close the HTTP client and release connections."""
@@ -250,7 +263,7 @@ _mcp_client: Optional[MCPClient] = None
 
 def get_mcp_client() -> MCPClient:
     """Get or create the singleton MCP client instance.
-    
+
     Returns:
         Configured MCPClient (may be disabled if MCP_ENABLED=false).
     """

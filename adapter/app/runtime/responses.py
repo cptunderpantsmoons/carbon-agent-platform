@@ -3,6 +3,7 @@
 All provider-specific shapes are converted to/from these stable internal
 models so the dashboard and other consumers see one payload shape.
 """
+
 from typing import Literal, Optional
 from pydantic import BaseModel, Field
 

@@ -12,6 +12,7 @@ Example Railway production env::
 
     RATE_LIMIT_STORAGE_URI=redis://redis:6379/0
 """
+
 import re
 from fastapi import Request
 from fastapi.responses import JSONResponse
@@ -56,7 +57,9 @@ def _make_limiter(storage_uri: str) -> Limiter:
 limiter: Limiter = _make_limiter(get_settings().rate_limit_storage_uri)
 
 
-def rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded) -> JSONResponse:
+def rate_limit_exceeded_handler(
+    request: Request, exc: RateLimitExceeded
+) -> JSONResponse:
     """Return a 429 JSON response with a ``Retry-After`` header.
 
     Parses the limit string from *exc* (e.g. ``"60 per 1 minute"``) to derive

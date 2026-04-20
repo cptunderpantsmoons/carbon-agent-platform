@@ -3,7 +3,7 @@
 Replaces keyword-based MCP augmentation with explicit tool registration.
 MCP surfaces are discovered and registered as first-class pydantic-ai tools.
 """
-from typing import Callable, Awaitable
+
 import structlog
 
 from pydantic_ai import Tool
@@ -63,9 +63,6 @@ async def discover_mcp_tools() -> list[Tool]:
                 return str(result.get("result", ""))
             return f"Tool error: {result.get('error', 'unknown')}"
 
-        # Attach parameter schema if available
-        parameters = getattr(t, "parameters", None) or {}
-
         pydantic_tools.append(
             Tool(
                 _mcp_wrapper,
@@ -74,7 +71,9 @@ async def discover_mcp_tools() -> list[Tool]:
                 takes_ctx=False,
             )
         )
-        logger.info("mcp_tool_registered", tool=tool_name, sensitive=_is_sensitive(tool_name))
+        logger.info(
+            "mcp_tool_registered", tool=tool_name, sensitive=_is_sensitive(tool_name)
+        )
 
     return pydantic_tools
 
@@ -113,7 +112,6 @@ async def get_registered_tools(
 
 def _wrap_with_approval(tool: Tool) -> Tool:
     """Wrap a tool so it returns an approval request instead of executing."""
-    original = tool.function
 
     async def _approval_gate(*args, **kwargs) -> str:
         return (

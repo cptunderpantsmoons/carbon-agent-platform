@@ -1,4 +1,5 @@
 """Tests for session manager and Docker container lifecycle."""
+
 import pytest
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -58,7 +59,9 @@ async def test_ensure_user_service_creates_new_service(
     }
 
     with patch.object(session_manager, "docker_manager", mock_docker):
-        was_created, _ = await session_manager.ensure_user_service(mock_db, "test-user-1")
+        was_created, _ = await session_manager.ensure_user_service(
+            mock_db, "test-user-1"
+        )
 
         assert was_created is True
         assert mock_user.status == UserStatus.ACTIVE
@@ -87,7 +90,9 @@ async def test_ensure_user_service_skips_existing_service(
     mock_docker.get_container_status.return_value = "running"
 
     with patch.object(session_manager, "docker_manager", mock_docker):
-        was_created, _ = await session_manager.ensure_user_service(mock_db, "test-user-1")
+        was_created, _ = await session_manager.ensure_user_service(
+            mock_db, "test-user-1"
+        )
 
         assert was_created is False
 
@@ -118,7 +123,9 @@ async def test_ensure_user_service_recreates_missing_active_service(
     }
 
     with patch.object(session_manager, "docker_manager", mock_docker):
-        was_created, _ = await session_manager.ensure_user_service(mock_db, "test-user-1")
+        was_created, _ = await session_manager.ensure_user_service(
+            mock_db, "test-user-1"
+        )
 
         assert was_created is True
         assert mock_user.status == UserStatus.ACTIVE
@@ -137,7 +144,9 @@ async def test_ensure_user_service_handles_nonexistent_user(
     mock_result.scalar_one_or_none.return_value = None
     mock_db.execute.return_value = mock_result
 
-    was_created, service_url = await session_manager.ensure_user_service(mock_db, "nonexistent-user")
+    was_created, service_url = await session_manager.ensure_user_service(
+        mock_db, "nonexistent-user"
+    )
 
     assert was_created is False
     assert service_url is None
@@ -555,7 +564,9 @@ async def test_provision_user_background_failure_raises(session_manager):
 
 
 @pytest.mark.asyncio
-async def test_cleanup_idle_sessions_actually_spins_down_users(session_manager, mock_user):
+async def test_cleanup_idle_sessions_actually_spins_down_users(
+    session_manager, mock_user
+):
     """Test that the cleanup task actually spins down idle users."""
     # Set up user with active service
     mock_user.status = UserStatus.ACTIVE
@@ -567,16 +578,17 @@ async def test_cleanup_idle_sessions_actually_spins_down_users(session_manager, 
     mock_db.execute.return_value = mock_result
 
     # Mock Docker manager
-    mock_docker = AsyncMock()
-
     # Set session activity to old time (beyond timeout)
     old_time = datetime.now(timezone.utc) - timedelta(minutes=30)
     session_manager._active_sessions["test-user-1"] = old_time
 
     # Patch spin_down_idle_user to verify it gets called
-    with patch.object(session_manager, "spin_down_idle_user", return_value=True) as mock_spin_down:
+    with patch.object(
+        session_manager, "spin_down_idle_user", return_value=True
+    ) as mock_spin_down:
         # Run one iteration of the cleanup loop manually
         from app.config import get_settings
+
         settings = get_settings()
         idle_timeout = timedelta(minutes=settings.session_idle_timeout_minutes)
         current_time = datetime.now(timezone.utc)
@@ -613,8 +625,11 @@ async def test_cleanup_idle_sessions_continues_on_failure(session_manager):
             return False  # Simulate failure
         return True
 
-    with patch.object(session_manager, "spin_down_idle_user", side_effect=mock_spin_down):
+    with patch.object(
+        session_manager, "spin_down_idle_user", side_effect=mock_spin_down
+    ):
         from app.config import get_settings
+
         settings = get_settings()
         idle_timeout = timedelta(minutes=settings.session_idle_timeout_minutes)
         current_time = datetime.now(timezone.utc)
@@ -643,7 +658,9 @@ async def test_cleanup_idle_sessions_continues_on_failure(session_manager):
 
 
 @pytest.mark.asyncio
-async def test_cleanup_idle_sessions_removes_from_active_sessions(session_manager, mock_user):
+async def test_cleanup_idle_sessions_removes_from_active_sessions(
+    session_manager, mock_user
+):
     """Test that cleanup removes users from _active_sessions after spin down."""
     # Set up user with active service
     mock_user.status = UserStatus.ACTIVE

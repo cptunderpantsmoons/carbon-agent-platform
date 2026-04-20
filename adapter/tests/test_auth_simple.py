@@ -1,4 +1,5 @@
 """Simple synchronous test client for adapter."""
+
 import pytest
 from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
@@ -7,6 +8,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from app.auth import get_db
 from app.main import app
 from app.models import Base, User, UserStatus
+
 
 @pytest.fixture
 def client():
@@ -47,7 +49,7 @@ def test_chat_completions_requires_auth(client):
         json={
             "model": "carbon-agent",
             "messages": [{"role": "user", "content": "Hello"}],
-        }
+        },
     )
     assert response.status_code == 401
 

@@ -1,6 +1,4 @@
-import re
-
-with open('rag.py', 'r', encoding='utf-8') as f:
+with open("rag.py", "r", encoding="utf-8") as f:
     content = f.read()
 
 # 1. Replace the _get_fixed_tenant_id and build_scoped_rag_request block
@@ -89,15 +87,15 @@ while i < len(lines):
     line = lines[i]
     new_lines.append(line)
     # Look for query_rag function signature
-    if line.strip().startswith('async def query_rag'):
+    if line.strip().startswith("async def query_rag"):
         # Find the line with _ensure_active_principal
         j = i + 1
-        while j < len(lines) and '_ensure_active_principal(principal)' not in lines[j]:
+        while j < len(lines) and "_ensure_active_principal(principal)" not in lines[j]:
             j += 1
         if j < len(lines):
             # Insert tenant_id extraction after that line
-            new_lines.extend(lines[i+1:j+1])  # include the _ensure line
-            new_lines.append('    tenant_id = _get_tenant_id_from_request(request)\n')
+            new_lines.extend(lines[i + 1 : j + 1])  # include the _ensure line
+            new_lines.append("    tenant_id = _get_tenant_id_from_request(request)\n")
             i = j
             continue
     i += 1
@@ -106,7 +104,7 @@ while i < len(lines):
 # Instead, we'll create a new version from scratch? Too much.
 # Let's output the current content and manually edit later.
 print("Writing updated file...")
-with open('rag.py', 'w', encoding='utf-8') as f:
+with open("rag.py", "w", encoding="utf-8") as f:
     f.write(content)
 
 print("Done. Please manually update endpoint functions to use tenant_id.")

@@ -1,5 +1,5 @@
 """SSE streaming response formatter for OpenAI-compatible format."""
-import json
+
 import uuid
 from datetime import datetime
 from typing import AsyncGenerator
@@ -40,7 +40,9 @@ async def fake_stream_response(text: str) -> AsyncGenerator[str, None]:
     for word in words:
         # Re-add space that split() removed (except for last word)
         idx = text.find(word)
-        suffix = " " if idx + len(word) < len(text) and text[idx + len(word)] == " " else ""
+        suffix = (
+            " " if idx + len(word) < len(text) and text[idx + len(word)] == " " else ""
+        )
         yield create_chunk(completion_id, content=word + suffix)
 
     # Final chunk: done

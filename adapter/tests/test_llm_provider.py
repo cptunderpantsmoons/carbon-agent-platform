@@ -1,9 +1,9 @@
 """Tests for LLM provider abstraction layer."""
+
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.llm_provider import (
-    LLMProvider,
     AgentZeroProvider,
     OpenAIProvider,
     FeatherlessProvider,
@@ -11,7 +11,6 @@ from app.llm_provider import (
     AnthropicProvider,
     create_provider,
 )
-from app.config import get_settings
 from app.runtime.providers import resolve_provider_from_policy
 
 
@@ -21,8 +20,7 @@ class TestFeatherlessProvider:
     def test_initialization(self):
         """FeatherlessProvider initializes with correct endpoint."""
         provider = FeatherlessProvider(
-            api_key="fl-test-key",
-            model="meta-llama-3.1-70b-instruct"
+            api_key="fl-test-key", model="meta-llama-3.1-70b-instruct"
         )
 
         assert provider.model == "meta-llama-3.1-70b-instruct"
@@ -45,7 +43,7 @@ class TestFeatherlessProvider:
         mock_client = AsyncMock()
         mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
 
-        with patch.object(FeatherlessProvider, '__init__', return_value=None):
+        with patch.object(FeatherlessProvider, "__init__", return_value=None):
             provider = FeatherlessProvider()
             provider.model = "meta-llama-3.1-70b-instruct"
             provider.client = mock_client
@@ -68,7 +66,7 @@ class TestFeatherlessProvider:
         mock_client = AsyncMock()
         mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
 
-        with patch.object(FeatherlessProvider, '__init__', return_value=None):
+        with patch.object(FeatherlessProvider, "__init__", return_value=None):
             provider = FeatherlessProvider()
             provider.model = "test-model"
             provider.client = mock_client
@@ -88,7 +86,7 @@ class TestFeatherlessProvider:
         mock_client = AsyncMock()
         mock_client.models.list = AsyncMock(return_value=["model1", "model2"])
 
-        with patch.object(FeatherlessProvider, '__init__', return_value=None):
+        with patch.object(FeatherlessProvider, "__init__", return_value=None):
             provider = FeatherlessProvider()
             provider.client = mock_client
 
@@ -101,7 +99,7 @@ class TestFeatherlessProvider:
         mock_client = AsyncMock()
         mock_client.models.list = AsyncMock(side_effect=Exception("Connection refused"))
 
-        with patch.object(FeatherlessProvider, '__init__', return_value=None):
+        with patch.object(FeatherlessProvider, "__init__", return_value=None):
             provider = FeatherlessProvider()
             provider.client = mock_client
 
@@ -115,8 +113,7 @@ class TestDeepSeekProvider:
     def test_initialization(self):
         """DeepSeekProvider initializes with correct endpoint."""
         provider = DeepSeekProvider(
-            api_key="sk-deepseek-test-key",
-            model="deepseek-chat"
+            api_key="sk-deepseek-test-key", model="deepseek-chat"
         )
 
         assert provider.model == "deepseek-chat"
@@ -130,10 +127,7 @@ class TestDeepSeekProvider:
 
     def test_coder_model(self):
         """Can use deepseek-coder model."""
-        provider = DeepSeekProvider(
-            api_key="sk-test-key",
-            model="deepseek-coder"
-        )
+        provider = DeepSeekProvider(api_key="sk-test-key", model="deepseek-coder")
         assert provider.model == "deepseek-coder"
 
     @pytest.mark.asyncio
@@ -147,7 +141,7 @@ class TestDeepSeekProvider:
         mock_client = AsyncMock()
         mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
 
-        with patch.object(DeepSeekProvider, '__init__', return_value=None):
+        with patch.object(DeepSeekProvider, "__init__", return_value=None):
             provider = DeepSeekProvider()
             provider.model = "deepseek-chat"
             provider.client = mock_client
@@ -170,7 +164,7 @@ class TestDeepSeekProvider:
         mock_client = AsyncMock()
         mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
 
-        with patch.object(DeepSeekProvider, '__init__', return_value=None):
+        with patch.object(DeepSeekProvider, "__init__", return_value=None):
             provider = DeepSeekProvider()
             provider.model = "deepseek-chat"
             provider.client = mock_client
@@ -190,7 +184,7 @@ class TestDeepSeekProvider:
         mock_client = AsyncMock()
         mock_client.models.list = AsyncMock(return_value=["model1", "model2"])
 
-        with patch.object(DeepSeekProvider, '__init__', return_value=None):
+        with patch.object(DeepSeekProvider, "__init__", return_value=None):
             provider = DeepSeekProvider()
             provider.client = mock_client
 
@@ -203,7 +197,7 @@ class TestDeepSeekProvider:
         mock_client = AsyncMock()
         mock_client.models.list = AsyncMock(side_effect=Exception("Connection refused"))
 
-        with patch.object(DeepSeekProvider, '__init__', return_value=None):
+        with patch.object(DeepSeekProvider, "__init__", return_value=None):
             provider = DeepSeekProvider()
             provider.client = mock_client
 
@@ -216,10 +210,7 @@ class TestOpenAIProvider:
 
     def test_initialization(self):
         """OpenAIProvider initializes correctly."""
-        provider = OpenAIProvider(
-            api_key="sk-test-key",
-            model="gpt-4o"
-        )
+        provider = OpenAIProvider(api_key="sk-test-key", model="gpt-4o")
 
         assert provider.model == "gpt-4o"
         assert provider.client is not None
@@ -229,7 +220,7 @@ class TestOpenAIProvider:
         provider = OpenAIProvider(
             api_key="sk-test-key",
             model="custom-model",
-            base_url="https://custom-api.example.com/v1"
+            base_url="https://custom-api.example.com/v1",
         )
 
         assert provider.client.base_url == "https://custom-api.example.com/v1"
@@ -244,7 +235,7 @@ class TestOpenAIProvider:
         mock_client = AsyncMock()
         mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
 
-        with patch.object(OpenAIProvider, '__init__', return_value=None):
+        with patch.object(OpenAIProvider, "__init__", return_value=None):
             provider = OpenAIProvider()
             provider.model = "gpt-4o"
             provider.client = mock_client
@@ -262,8 +253,7 @@ class TestAnthropicProvider:
     def test_initialization(self):
         """AnthropicProvider initializes with correct headers."""
         provider = AnthropicProvider(
-            api_key="sk-ant-test-key",
-            model="claude-3-sonnet-20240229"
+            api_key="sk-ant-test-key", model="claude-3-sonnet-20240229"
         )
 
         assert provider.model == "claude-3-sonnet-20240229"
@@ -274,9 +264,7 @@ class TestAnthropicProvider:
     async def test_chat_completion_message_translation(self):
         """Anthropic provider translates OpenAI format to Anthropic format."""
         mock_response = MagicMock()
-        mock_response.json.return_value = {
-            "content": [{"text": "Hello from Claude!"}]
-        }
+        mock_response.json.return_value = {"content": [{"text": "Hello from Claude!"}]}
 
         mock_client = AsyncMock()
         mock_client.post = AsyncMock(return_value=mock_response)
@@ -316,8 +304,7 @@ class TestAgentZeroProvider:
     def test_initialization(self):
         """AgentZeroProvider initializes with base URL."""
         provider = AgentZeroProvider(
-            base_url="http://localhost:5000",
-            api_key="test-key"
+            base_url="http://localhost:5000", api_key="test-key"
         )
 
         assert provider.base_url == "http://localhost:5000"
@@ -428,7 +415,7 @@ class TestProviderFactory:
             provider = create_provider(
                 provider_type="featherless",
                 api_key="fl-explicit-key",
-                model="explicit-model"
+                model="explicit-model",
             )
 
             assert isinstance(provider, FeatherlessProvider)
@@ -452,18 +439,24 @@ class TestPolicyRouting:
         """Force premium always picks the same provider order."""
         allowed = ["deepseek", "anthropic", "openai"]
         first = resolve_provider_from_policy(None, "deepseek", allowed, "force_premium")
-        second = resolve_provider_from_policy(None, "deepseek", allowed, "force_premium")
+        second = resolve_provider_from_policy(
+            None, "deepseek", allowed, "force_premium"
+        )
         assert first == second == "openai"
 
     def test_block_premium_chooses_non_premium_fallback(self):
         """Block premium falls back to an allowed non-premium provider."""
-        provider = resolve_provider_from_policy("openai", "openai", ["deepseek", "openai"], "block_premium")
+        provider = resolve_provider_from_policy(
+            "openai", "openai", ["deepseek", "openai"], "block_premium"
+        )
         assert provider == "deepseek"
 
     def test_block_premium_rejects_all_premium_configuration(self):
         """Block premium raises when no non-premium providers are available."""
         with pytest.raises(ValueError):
-            resolve_provider_from_policy("openai", "openai", ["openai", "anthropic"], "block_premium")
+            resolve_provider_from_policy(
+                "openai", "openai", ["openai", "anthropic"], "block_premium"
+            )
 
 
 class TestProviderIntegration:
@@ -490,7 +483,7 @@ class TestProviderIntegration:
             mock_client = AsyncMock()
             mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
 
-            with patch.object(FeatherlessProvider, '__init__', return_value=None):
+            with patch.object(FeatherlessProvider, "__init__", return_value=None):
                 llm = FeatherlessProvider()
                 llm.model = "meta-llama-3.1-70b-instruct"
                 llm.client = mock_client
@@ -522,4 +515,6 @@ class TestProviderIntegration:
                 mock_settings.return_value.llm_base_url = "http://localhost:5000"
 
                 provider = create_provider()
-                assert isinstance(provider, expected_class), f"Failed for {provider_type}"
+                assert isinstance(provider, expected_class), (
+                    f"Failed for {provider_type}"
+                )

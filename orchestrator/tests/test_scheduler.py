@@ -1,4 +1,5 @@
 """Tests for the scheduler and all background tasks."""
+
 import pytest
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -49,10 +50,18 @@ def mock_user_no_service():
 @pytest.mark.asyncio
 async def test_scheduler_start_creates_tasks(scheduler):
     """Test that starting the scheduler creates background tasks."""
-    with patch.object(scheduler, "_health_monitor_loop", new_callable=AsyncMock) as mock_health:
-        with patch.object(scheduler, "_analytics_loop", new_callable=AsyncMock) as mock_analytics:
-            with patch.object(scheduler, "_audit_cleanup_loop", new_callable=AsyncMock) as mock_audit:
-                with patch.object(scheduler, "_db_health_check_loop", new_callable=AsyncMock) as mock_db:
+    with patch.object(
+        scheduler, "_health_monitor_loop", new_callable=AsyncMock
+    ) as mock_health:
+        with patch.object(
+            scheduler, "_analytics_loop", new_callable=AsyncMock
+        ) as mock_analytics:
+            with patch.object(
+                scheduler, "_audit_cleanup_loop", new_callable=AsyncMock
+            ) as mock_audit:
+                with patch.object(
+                    scheduler, "_db_health_check_loop", new_callable=AsyncMock
+                ) as mock_db:
                     # Make the loops exit immediately
                     mock_health.side_effect = asyncio.CancelledError()
                     mock_analytics.side_effect = asyncio.CancelledError()
@@ -70,6 +79,7 @@ async def test_scheduler_start_creates_tasks(scheduler):
 @pytest.mark.asyncio
 async def test_scheduler_stop_cancels_tasks(scheduler):
     """Test that stopping the scheduler cancels all tasks."""
+
     async def slow_loop():
         """A loop that sleeps for a long time."""
         try:
@@ -80,7 +90,9 @@ async def test_scheduler_stop_cancels_tasks(scheduler):
     with patch.object(scheduler, "_health_monitor_loop", side_effect=slow_loop):
         with patch.object(scheduler, "_analytics_loop", side_effect=slow_loop):
             with patch.object(scheduler, "_audit_cleanup_loop", side_effect=slow_loop):
-                with patch.object(scheduler, "_db_health_check_loop", side_effect=slow_loop):
+                with patch.object(
+                    scheduler, "_db_health_check_loop", side_effect=slow_loop
+                ):
                     await scheduler.start()
                     assert scheduler.get_task_count() == 4
 
@@ -93,6 +105,7 @@ async def test_scheduler_stop_cancels_tasks(scheduler):
 @pytest.mark.asyncio
 async def test_scheduler_start_idempotent(scheduler):
     """Test that starting an already-running scheduler is a no-op."""
+
     async def slow_loop():
         try:
             await asyncio.sleep(3600)
@@ -102,7 +115,9 @@ async def test_scheduler_start_idempotent(scheduler):
     with patch.object(scheduler, "_health_monitor_loop", side_effect=slow_loop):
         with patch.object(scheduler, "_analytics_loop", side_effect=slow_loop):
             with patch.object(scheduler, "_audit_cleanup_loop", side_effect=slow_loop):
-                with patch.object(scheduler, "_db_health_check_loop", side_effect=slow_loop):
+                with patch.object(
+                    scheduler, "_db_health_check_loop", side_effect=slow_loop
+                ):
                     await scheduler.start()
                     first_count = scheduler.get_task_count()
 
@@ -253,7 +268,9 @@ async def test_health_monitor_loop_runs_periodically(scheduler):
             scheduler._running = False
 
     with patch("app.scheduler.get_settings", return_value=settings_mock):
-        with patch.object(scheduler, "_check_service_health", side_effect=mock_check_health):
+        with patch.object(
+            scheduler, "_check_service_health", side_effect=mock_check_health
+        ):
             with patch("asyncio.sleep", side_effect=mock_sleep):
                 scheduler._running = True
                 await scheduler._health_monitor_loop()
@@ -280,7 +297,9 @@ async def test_health_monitor_loop_error_recovery(scheduler):
             scheduler._running = False
 
     with patch("app.scheduler.get_settings", return_value=settings_mock):
-        with patch.object(scheduler, "_check_service_health", side_effect=mock_check_health):
+        with patch.object(
+            scheduler, "_check_service_health", side_effect=mock_check_health
+        ):
             with patch("asyncio.sleep", side_effect=mock_sleep):
                 scheduler._running = True
                 await scheduler._health_monitor_loop()
@@ -312,7 +331,7 @@ async def test_aggregate_usage_analytics(scheduler, mock_user, mock_user_no_serv
         assert "total_users" in metrics
         assert "active_users" in metrics
         assert "inactive_users" in metrics
-        assert "active_containers" in metrics
+        assert "active_docker_containers" in metrics
         assert "total_audit_logs" in metrics
         assert "timestamp" in metrics
 
@@ -352,7 +371,9 @@ async def test_analytics_loop_runs_periodically(scheduler):
             scheduler._running = False
 
     with patch("app.scheduler.get_settings", return_value=settings_mock):
-        with patch.object(scheduler, "_aggregate_usage_analytics", side_effect=mock_aggregate):
+        with patch.object(
+            scheduler, "_aggregate_usage_analytics", side_effect=mock_aggregate
+        ):
             with patch("asyncio.sleep", side_effect=mock_sleep):
                 scheduler._running = True
                 await scheduler._analytics_loop()
@@ -430,7 +451,7 @@ async def test_cleanup_old_audit_logs_error_handling(scheduler):
     with patch.object(scheduler, "_get_db_session", return_value=mock_db):
         with patch("app.scheduler.get_settings", return_value=settings_mock):
             # Should not raise
-            results = await scheduler._cleanup_old_audit_logs()
+            await scheduler._cleanup_old_audit_logs()
 
             mock_db.close.assert_called_once()
 
@@ -452,7 +473,9 @@ async def test_audit_cleanup_loop_runs_periodically(scheduler):
             scheduler._running = False
 
     with patch("app.scheduler.get_settings", return_value=settings_mock):
-        with patch.object(scheduler, "_cleanup_old_audit_logs", side_effect=mock_cleanup):
+        with patch.object(
+            scheduler, "_cleanup_old_audit_logs", side_effect=mock_cleanup
+        ):
             with patch("asyncio.sleep", side_effect=mock_sleep):
                 scheduler._running = True
                 await scheduler._audit_cleanup_loop()
@@ -640,6 +663,9 @@ async def test_one_task_failure_does_not_stop_others(scheduler):
     health_call_count = 0
     analytics_call_count = 0
 
+    # Capture the real sleep BEFORE patching so we can yield inside mock_sleep
+    real_sleep = asyncio.sleep
+
     async def mock_health_check():
         nonlocal health_call_count
         health_call_count += 1
@@ -650,22 +676,28 @@ async def test_one_task_failure_does_not_stop_others(scheduler):
         analytics_call_count += 1
 
     async def mock_sleep(seconds):
+        # Yield to the event loop so asyncio.gather can switch between tasks
+        await real_sleep(0)
         if analytics_call_count >= 2:
             scheduler._running = False
 
     with patch("app.scheduler.get_settings", return_value=settings_mock):
-        with patch.object(scheduler, "_check_service_health", side_effect=mock_health_check):
-            with patch.object(scheduler, "_aggregate_usage_analytics", side_effect=mock_analytics):
+        with patch.object(
+            scheduler, "_check_service_health", side_effect=mock_health_check
+        ):
+            with patch.object(
+                scheduler, "_aggregate_usage_analytics", side_effect=mock_analytics
+            ):
                 with patch("asyncio.sleep", side_effect=mock_sleep):
                     scheduler._running = True
-                    # Run both loops
+                    # Run both loops concurrently; analytics should run even if health fails
                     await asyncio.gather(
                         scheduler._health_monitor_loop(),
                         scheduler._analytics_loop(),
                         return_exceptions=True,
                     )
 
-                    # Analytics should have run even though health check failed
+                    # Analytics should have run at least once despite health failures
                     assert analytics_call_count >= 1
 
 
@@ -737,6 +769,7 @@ async def test_scheduler_uses_config_intervals(scheduler):
 @pytest.mark.asyncio
 async def test_scheduler_full_lifecycle(scheduler):
     """Test complete scheduler lifecycle: start -> run -> stop."""
+
     async def slow_loop():
         try:
             await asyncio.sleep(3600)
@@ -746,7 +779,9 @@ async def test_scheduler_full_lifecycle(scheduler):
     with patch.object(scheduler, "_health_monitor_loop", side_effect=slow_loop):
         with patch.object(scheduler, "_analytics_loop", side_effect=slow_loop):
             with patch.object(scheduler, "_audit_cleanup_loop", side_effect=slow_loop):
-                with patch.object(scheduler, "_db_health_check_loop", side_effect=slow_loop):
+                with patch.object(
+                    scheduler, "_db_health_check_loop", side_effect=slow_loop
+                ):
                     # Start
                     assert scheduler.is_running() is False
                     await scheduler.start()
@@ -788,6 +823,7 @@ async def test_scheduler_tasks_handle_cancellation_gracefully(scheduler):
 @pytest.mark.asyncio
 async def test_scheduler_concurrent_start_stop(scheduler):
     """Test that concurrent start/stop operations are handled safely."""
+
     async def slow_loop():
         try:
             await asyncio.sleep(3600)
@@ -797,7 +833,9 @@ async def test_scheduler_concurrent_start_stop(scheduler):
     with patch.object(scheduler, "_health_monitor_loop", side_effect=slow_loop):
         with patch.object(scheduler, "_analytics_loop", side_effect=slow_loop):
             with patch.object(scheduler, "_audit_cleanup_loop", side_effect=slow_loop):
-                with patch.object(scheduler, "_db_health_check_loop", side_effect=slow_loop):
+                with patch.object(
+                    scheduler, "_db_health_check_loop", side_effect=slow_loop
+                ):
                     # Start and immediately stop
                     start_task = asyncio.create_task(scheduler.start())
                     await asyncio.sleep(0.01)
@@ -822,33 +860,38 @@ class TestAuditCleanupIntegration:
     @staticmethod
     async def _seed(factory, *, old_plain_id, old_critical_id, recent_id):
         """Insert three AuditLog rows with carefully chosen created_at values."""
-        from datetime import datetime, timezone, timedelta
 
         async with factory() as s:
-            s.add(AuditLog(
-                id=old_plain_id,
-                user_id=None,
-                action="user.logged_in",          # non-critical, old → must be deleted
-                details={"info": "seed"},
-                performed_by="test",
-                created_at=datetime.now(timezone.utc) - timedelta(days=100),
-            ))
-            s.add(AuditLog(
-                id=old_critical_id,
-                user_id=None,
-                action="user_deleted",             # critical, old → must be preserved
-                details={"info": "seed"},
-                performed_by="admin",
-                created_at=datetime.now(timezone.utc) - timedelta(days=100),
-            ))
-            s.add(AuditLog(
-                id=recent_id,
-                user_id=None,
-                action="user.logged_in",           # non-critical, recent → must be preserved
-                details={"info": "seed"},
-                performed_by="test",
-                created_at=datetime.now(timezone.utc) - timedelta(days=1),
-            ))
+            s.add(
+                AuditLog(
+                    id=old_plain_id,
+                    user_id=None,
+                    action="user.logged_in",  # non-critical, old → must be deleted
+                    details={"info": "seed"},
+                    performed_by="test",
+                    created_at=datetime.now(timezone.utc) - timedelta(days=100),
+                )
+            )
+            s.add(
+                AuditLog(
+                    id=old_critical_id,
+                    user_id=None,
+                    action="user_deleted",  # critical, old → must be preserved
+                    details={"info": "seed"},
+                    performed_by="admin",
+                    created_at=datetime.now(timezone.utc) - timedelta(days=100),
+                )
+            )
+            s.add(
+                AuditLog(
+                    id=recent_id,
+                    user_id=None,
+                    action="user.logged_in",  # non-critical, recent → must be preserved
+                    details={"info": "seed"},
+                    performed_by="test",
+                    created_at=datetime.now(timezone.utc) - timedelta(days=1),
+                )
+            )
             await s.commit()
 
     @pytest.mark.asyncio
@@ -863,10 +906,12 @@ class TestAuditCleanupIntegration:
         db_module._session_factory = factory
 
         try:
-            await self._seed(factory,
+            await self._seed(
+                factory,
                 old_plain_id="integ-old-plain",
                 old_critical_id="integ-old-critical",
-                recent_id="integ-recent")
+                recent_id="integ-recent",
+            )
 
             with patch("app.scheduler.get_settings") as ms:
                 ms.return_value.audit_retention_days = 90
@@ -874,7 +919,9 @@ class TestAuditCleanupIntegration:
 
             # Structural assertions on the returned summary dict
             assert results["deleted_count"] >= 1, "expected at least one deletion"
-            assert results["preserved_count"] >= 1, "expected at least one preserved critical row"
+            assert results["preserved_count"] >= 1, (
+                "expected at least one preserved critical row"
+            )
             assert "cutoff_date" in results
             assert "timestamp" in results
 
@@ -883,9 +930,11 @@ class TestAuditCleanupIntegration:
                 rows = (await s.execute(sa_select(AuditLog))).scalars().all()
                 ids = {r.id for r in rows}
 
-            assert "integ-old-plain" not in ids,    "old non-critical row should be deleted"
-            assert "integ-old-critical" in ids,     "old critical row must be preserved"
-            assert "integ-recent" in ids,           "recent row must not be touched"
+            assert "integ-old-plain" not in ids, (
+                "old non-critical row should be deleted"
+            )
+            assert "integ-old-critical" in ids, "old critical row must be preserved"
+            assert "integ-recent" in ids, "recent row must not be touched"
         finally:
             db_module._session_factory = old_factory
 
@@ -926,9 +975,17 @@ class TestAuditCleanupIntegration:
                 await scheduler._cleanup_old_audit_logs()
 
             async with factory() as s:
-                rows = (await s.execute(
-                    sa_select(AuditLog).where(AuditLog.action == "audit_log_cleanup")
-                )).scalars().all()
+                rows = (
+                    (
+                        await s.execute(
+                            sa_select(AuditLog).where(
+                                AuditLog.action == "audit_log_cleanup"
+                            )
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
 
             assert len(rows) >= 1, "cleanup must write an audit_log_cleanup entry"
             assert rows[0].performed_by == "scheduler"
@@ -941,7 +998,6 @@ class TestAuditCleanupIntegration:
         import app.database as db_module
         from sqlalchemy.ext.asyncio import async_sessionmaker
         from sqlalchemy import select as sa_select
-        from datetime import datetime, timezone, timedelta
 
         factory = async_sessionmaker(engine, expire_on_commit=False)
         old_factory = db_module._session_factory
@@ -950,14 +1006,16 @@ class TestAuditCleanupIntegration:
         try:
             async with factory() as s:
                 for i in range(5):
-                    s.add(AuditLog(
-                        id=f"recent-{i}",
-                        user_id=None,
-                        action="user.logged_in",
-                        details={},
-                        performed_by="test",
-                        created_at=datetime.now(timezone.utc) - timedelta(hours=i),
-                    ))
+                    s.add(
+                        AuditLog(
+                            id=f"recent-{i}",
+                            user_id=None,
+                            action="user.logged_in",
+                            details={},
+                            performed_by="test",
+                            created_at=datetime.now(timezone.utc) - timedelta(hours=i),
+                        )
+                    )
                 await s.commit()
 
             with patch("app.scheduler.get_settings") as ms:
@@ -968,11 +1026,14 @@ class TestAuditCleanupIntegration:
 
             async with factory() as s:
                 from sqlalchemy import func as sqla_func
-                count = (await s.execute(
-                    sa_select(sqla_func.count(AuditLog.id)).where(
-                        AuditLog.id.like("recent-%")
+
+                count = (
+                    await s.execute(
+                        sa_select(sqla_func.count(AuditLog.id)).where(
+                            AuditLog.id.like("recent-%")
+                        )
                     )
-                )).scalar()
+                ).scalar()
             assert count == 5, "none of the fresh logs should have been deleted"
         finally:
             db_module._session_factory = old_factory

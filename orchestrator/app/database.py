@@ -1,14 +1,18 @@
 """Database connection and session management."""
+
 from collections.abc import AsyncGenerator
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy.orm import DeclarativeBase
 from app.config import get_settings
 
+
 class Base(DeclarativeBase):
     pass
 
+
 _engine = None
 _session_factory = None
+
 
 def _get_database_url() -> str:
     url = get_settings().database_url
@@ -16,16 +20,19 @@ def _get_database_url() -> str:
         url = url.replace("postgresql://", "postgresql+asyncpg://")
     return url
 
+
 def init_db():
     global _engine, _session_factory
     _engine = create_async_engine(_get_database_url(), echo=False)
     _session_factory = async_sessionmaker(_engine, expire_on_commit=False)
+
 
 async def get_session() -> AsyncGenerator[AsyncSession, None]:
     if _session_factory is None:
         init_db()
     async with _session_factory() as session:
         yield session
+
 
 def create_session() -> AsyncSession:
     """Create a bare AsyncSession for use in background tasks.
@@ -37,6 +44,27 @@ def create_session() -> AsyncSession:
     if _session_factory is None:
         init_db()
     return _session_factory()
+
+
+async def provision_session() -> AsyncGenerator[AsyncSession, None]:
+    """Async context manager for background provisioning tasks.
+
+    Unlike get_session(), this is designed for fire-and-forget tasks
+    (like provision_user_background) that run outside the request lifecycle.
+    The session is automatically closed when the context exits.
+
+    Usage:
+        async with provision_session() as db:
+            await db.execute(...)
+    """
+    if _session_factory is None:
+        init_db()
+    session = _session_factory()
+    try:
+        yield session
+    finally:
+        await session.close()
+
 
 async def create_tables():
     if _engine is None:

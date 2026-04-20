@@ -2,6 +2,7 @@
 Carbon Agent Platform - VPS Deployment Script
 Connects via SSH and deploys the full stack
 """
+
 import paramiko
 import time
 import sys
@@ -14,12 +15,12 @@ try:
 except Exception:
     pass
 
-HOST     = "187.127.112.59"
-USER     = "root"
+HOST = "187.127.112.59"
+USER = "root"
 PASSWORD = "Letmein7009??"
-REPO     = "https://github.com/cptunderpantsmoons/carbon-agent-platform.git"
-DIR      = "/opt/carbon-agent-platform"
-HUB_DIR  = "/opt/carbon-agent-dashboard"
+REPO = "https://github.com/cptunderpantsmoons/carbon-agent-platform.git"
+DIR = "/opt/carbon-agent-platform"
+HUB_DIR = "/opt/carbon-agent-dashboard"
 BASE_DIR = Path(__file__).resolve().parent
 DASHBOARD_BASE_DIR = BASE_DIR.parent / "carbon-agent-dashboard"
 
@@ -96,7 +97,8 @@ G = "\033[92m"  # green
 R = "\033[91m"  # red
 Y = "\033[93m"  # yellow
 B = "\033[94m"  # blue
-E = "\033[0m"   # reset
+E = "\033[0m"  # reset
+
 
 def run(ssh, cmd, timeout=300, show=True, check=True):
     """Run a command over SSH, stream output, return (exit_code, stdout_str)."""
@@ -178,7 +180,9 @@ def sync_orchestrator_files(ssh, files):
             local_path = BASE_DIR / rel_path
             remote_path = f"{DIR}/{rel_path.replace(os.sep, '/')}"
             if not local_path.exists():
-                raise FileNotFoundError(f"Missing local orchestrator file: {local_path}")
+                raise FileNotFoundError(
+                    f"Missing local orchestrator file: {local_path}"
+                )
 
             remote_dir = os.path.dirname(remote_path)
             run(ssh, f"mkdir -p {remote_dir}", timeout=30, show=False)
@@ -245,10 +249,10 @@ def _is_local_or_placeholder_url(url):
 
 def deploy():
     STEPS = 12
-    print(f"\n{'='*60}")
-    print(f"  Carbon Agent Platform -- VPS Deployment")
+    print(f"\n{'=' * 60}")
+    print("  Carbon Agent Platform -- VPS Deployment")
     print(f"  Target : {HOST}")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
     ssh = paramiko.SSHClient()
     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
@@ -259,7 +263,12 @@ def deploy():
 
     # ── 2. Docker ────────────────────────────────────────────────────────────
     step(2, STEPS, "Ensuring Docker is installed ...")
-    run(ssh, "apt-get update -qq && apt-get install -y -qq curl git ca-certificates", timeout=180, show=False)
+    run(
+        ssh,
+        "apt-get update -qq && apt-get install -y -qq curl git ca-certificates",
+        timeout=180,
+        show=False,
+    )
     code, _ = run(ssh, "docker --version", show=False, check=False)
     if code != 0:
         print("  Installing Docker ...")
@@ -272,7 +281,11 @@ def deploy():
     code, _ = run(ssh, f"test -d {DIR}/.git", show=False, check=False)
     BRANCH = "feat/corporate-carbon-hub-pass-1"
     if code == 0:
-        run(ssh, f"cd {DIR} && git fetch origin && git reset --hard origin/{BRANCH}", timeout=60)
+        run(
+            ssh,
+            f"cd {DIR} && git fetch origin && git reset --hard origin/{BRANCH}",
+            timeout=60,
+        )
     else:
         run(ssh, f"git clone -b {BRANCH} {REPO} {DIR}", timeout=120)
     ok("Repo up to date")
@@ -302,8 +315,13 @@ def deploy():
 
     webui_admin_email = "admin@carbon.local"
     webui_admin_password = secrets.token_urlsafe(20)
-    admin_agent_control_token = os.environ.get("ADMIN_AGENT_CONTROL_TOKEN", "").strip() or secrets.token_urlsafe(24)
-    admin_agent_ssh_target = os.environ.get("ADMIN_AGENT_SSH_TARGET", "").strip() or "64Hk1NNpE19r6RaiWdwE7Pk7MgNThWKo@ssh.app.daytona.io"
+    admin_agent_control_token = os.environ.get(
+        "ADMIN_AGENT_CONTROL_TOKEN", ""
+    ).strip() or secrets.token_urlsafe(24)
+    admin_agent_ssh_target = (
+        os.environ.get("ADMIN_AGENT_SSH_TARGET", "").strip()
+        or "64Hk1NNpE19r6RaiWdwE7Pk7MgNThWKo@ssh.app.daytona.io"
+    )
     deepseek_api_key = _resolve_value(
         "DEEPSEEK_API_KEY",
         os.environ.get("DEEPSEEK_API_KEY"),
@@ -337,13 +355,31 @@ def deploy():
         local_env.get("CLERK_FRONTEND_API_URL"),
         existing_env.get("CLERK_FRONTEND_API_URL"),
     )
+    # Override localhost placeholder with derived Clerk domain for test keys
+    if _is_local_or_placeholder_url(
+        clerk_frontend_api_url
+    ) and clerk_publishable_key.startswith("pk_test_"):
+        import base64
+
+        domain = (
+            base64.b64decode(clerk_publishable_key.split("_", 2)[2])
+            .decode()
+            .rstrip("$")
+        )
+        clerk_frontend_api_url = f"https://{domain}"
 
     if _is_local_or_placeholder_url(clerk_publishable_key):
-        raise RuntimeError("Set a real CLERK_PUBLISHABLE_KEY before running deploy_to_server.py")
+        raise RuntimeError(
+            "Set a real CLERK_PUBLISHABLE_KEY before running deploy_to_server.py"
+        )
     if _is_local_or_placeholder_url(clerk_secret_key):
-        raise RuntimeError("Set a real CLERK_SECRET_KEY before running deploy_to_server.py")
+        raise RuntimeError(
+            "Set a real CLERK_SECRET_KEY before running deploy_to_server.py"
+        )
     if _is_local_or_placeholder_url(clerk_frontend_api_url):
-        raise RuntimeError("Set a real CLERK_FRONTEND_API_URL before running deploy_to_server.py")
+        raise RuntimeError(
+            "Set a real CLERK_FRONTEND_API_URL before running deploy_to_server.py"
+        )
 
     desired_env = {
         "POSTGRES_USER": "postgres",
@@ -369,7 +405,7 @@ def deploy():
         "CLERK_PUBLISHABLE_KEY": clerk_publishable_key,
         "CLERK_SECRET_KEY": clerk_secret_key,
         "CLERK_FRONTEND_API_URL": clerk_frontend_api_url,
-        f"CORS_ALLOWED_ORIGINS": f"http://{HOST}:3000,http://{HOST}:3001,http://{HOST}:3002,http://{HOST}:8000,http://{HOST}",
+        "CORS_ALLOWED_ORIGINS": f"http://{HOST}:3000,http://{HOST}:3001,http://{HOST}:3002,http://{HOST}:8000,http://{HOST}",
         "AUTO_CREATE_TABLES": "true",
         "WEBUI_SECRET": "dev-webui-secret-2024",
         "OPENWEBUI_API_KEY": "sk-dev-test-key",
@@ -409,17 +445,27 @@ def deploy():
 
     # ── 5. Docker network ────────────────────────────────────────────────────
     step(7, STEPS, "Docker network ...")
-    code, _ = run(ssh, "docker network inspect carbon-agent-net", show=False, check=False)
+    code, _ = run(
+        ssh, "docker network inspect carbon-agent-net", show=False, check=False
+    )
     if code != 0:
         run(ssh, "docker network create carbon-agent-net")
     ok("Network carbon-agent-net ready")
 
     # ── 6. Infrastructure (postgres + redis) ─────────────────────────────────
     step(8, STEPS, "Starting PostgreSQL + Redis ...")
-    run(ssh, f"cd {DIR} && docker compose -f docker-compose.infra.yml up -d postgres redis", timeout=120)
+    run(
+        ssh,
+        f"cd {DIR} && docker compose -f docker-compose.infra.yml up -d postgres redis",
+        timeout=120,
+    )
     print("  Waiting 15s for DB ...")
     time.sleep(15)
-    code, _ = run(ssh, "docker exec $(docker ps -qf 'name=.*postgres.*' | head -1) pg_isready -U postgres", check=False)
+    code, _ = run(
+        ssh,
+        "docker exec $(docker ps -qf 'name=.*postgres.*' | head -1) pg_isready -U postgres",
+        check=False,
+    )
     if code == 0:
         ok("PostgreSQL ready")
     else:
@@ -427,11 +473,19 @@ def deploy():
 
     # ── 7. Build + start app ─────────────────────────────────────────────────
     step(9, STEPS, "Building images (grab a coffee, this takes ~5 min) ...")
-    run(ssh, f"cd {DIR} && docker compose build orchestrator adapter dashboard open-webui", timeout=900)
+    run(
+        ssh,
+        f"cd {DIR} && docker compose build orchestrator adapter dashboard open-webui",
+        timeout=900,
+    )
     ok("Images built")
 
     step(10, STEPS, "Starting services ...")
-    run(ssh, f"cd {DIR} && docker compose up -d orchestrator adapter dashboard", timeout=120)
+    run(
+        ssh,
+        f"cd {DIR} && docker compose up -d orchestrator adapter dashboard",
+        timeout=120,
+    )
     print("  Waiting 30s for orchestrator + adapter + dashboard ...")
     time.sleep(30)
     run(ssh, f"cd {DIR} && docker compose up -d open-webui", timeout=60)
@@ -440,16 +494,28 @@ def deploy():
     # ── 8. Migrations ────────────────────────────────────────────────────────
     step(11, STEPS, "Running Alembic migrations ...")
     # Get the actual container name
-    code, orch_id = run(ssh, "docker ps --filter 'name=orchestrator' --format '{{.Names}}' | head -1", show=False, check=False)
+    code, orch_id = run(
+        ssh,
+        "docker ps --filter 'name=orchestrator' --format '{{.Names}}' | head -1",
+        show=False,
+        check=False,
+    )
     orch_id = orch_id.strip()
     if orch_id:
-        code, _ = run(ssh, f"docker exec {orch_id} python -m alembic upgrade head", timeout=60, check=False)
+        code, _ = run(
+            ssh,
+            f"docker exec {orch_id} python -m alembic upgrade head",
+            timeout=60,
+            check=False,
+        )
         if code == 0:
             ok("Migrations applied")
         else:
             warn("Migrations may have already run (AUTO_CREATE_TABLES=true) -- OK")
     else:
-        warn("Orchestrator container not found for migration -- AUTO_CREATE_TABLES=true will handle it")
+        warn(
+            "Orchestrator container not found for migration -- AUTO_CREATE_TABLES=true will handle it"
+        )
 
     # ── 9. Health checks ─────────────────────────────────────────────────────
     step(12, STEPS, "Health checks ...")
@@ -474,11 +540,21 @@ def deploy():
     results["Dashboard   :3001"] = code == 0
 
     # PostgreSQL
-    code, _ = run(ssh, "docker exec $(docker ps -qf 'name=.*postgres.*' | head -1) pg_isready -U postgres", check=False, show=False)
+    code, _ = run(
+        ssh,
+        "docker exec $(docker ps -qf 'name=.*postgres.*' | head -1) pg_isready -U postgres",
+        check=False,
+        show=False,
+    )
     results["PostgreSQL       "] = code == 0
 
     # Redis
-    code, _ = run(ssh, "docker exec $(docker ps -qf 'name=.*redis.*' | head -1) redis-cli ping", check=False, show=False)
+    code, _ = run(
+        ssh,
+        "docker exec $(docker ps -qf 'name=.*redis.*' | head -1) redis-cli ping",
+        check=False,
+        show=False,
+    )
     results["Redis            "] = code == 0
 
     for name, passed in results.items():
@@ -487,10 +563,14 @@ def deploy():
 
     # Show containers
     print(f"\n{B}-- Running containers --{E}")
-    run(ssh, "docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'", check=False)
+    run(
+        ssh,
+        "docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'",
+        check=False,
+    )
 
     all_ok = all(results.values())
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     if all_ok:
         print(f"  {G}>> DEPLOYMENT SUCCESSFUL!{E}")
     else:
@@ -506,7 +586,7 @@ def deploy():
     print(f"  Open WebUI   : http://{HOST}:3000")
     print(f"  Admin UI     : http://{HOST}:8000/dashboard")
     print(f"  API Docs     : http://{HOST}:8000/docs")
-    print(f"{'='*60}\n")
+    print(f"{'=' * 60}\n")
 
     ssh.close()
 

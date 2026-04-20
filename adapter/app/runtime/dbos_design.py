@@ -25,8 +25,9 @@ Usage:
         step2 = await agent.run(...)
         return step2
 """
+
 from functools import wraps
-from typing import Callable, Any
+from typing import Callable
 import structlog
 
 logger = structlog.get_logger()
@@ -35,6 +36,7 @@ logger = structlog.get_logger()
 _DBOS_AVAILABLE = False
 try:
     from dbos import DBOS
+
     _DBOS_AVAILABLE = True
 except ImportError:
     pass
@@ -52,6 +54,7 @@ def dbos_init(config: dict | None = None) -> None:
         return
 
     from app.config import get_settings
+
     settings = get_settings()
 
     dbos_config = config or {
@@ -94,6 +97,7 @@ def durable_step(name: str | None = None) -> Callable:
 
     Falls back to a no-op wrapper if DBOS is not available.
     """
+
     def decorator(func: Callable) -> Callable:
         if _DBOS_AVAILABLE:
             return DBOS.step(name=name)(func)
@@ -101,7 +105,9 @@ def durable_step(name: str | None = None) -> Callable:
         @wraps(func)
         async def wrapper(*args, **kwargs):
             return await func(*args, **kwargs)
+
         return wrapper
+
     return decorator
 
 
@@ -110,6 +116,7 @@ def durable_workflow(name: str | None = None) -> Callable:
 
     Falls back to a no-op wrapper if DBOS is not available.
     """
+
     def decorator(func: Callable) -> Callable:
         if _DBOS_AVAILABLE:
             return DBOS.workflow(name=name)(func)
@@ -117,31 +124,38 @@ def durable_workflow(name: str | None = None) -> Callable:
         @wraps(func)
         async def wrapper(*args, **kwargs):
             return await func(*args, **kwargs)
+
         return wrapper
+
     return decorator
 
 
 def _extract_db_host(url: str) -> str:
     from urllib.parse import urlparse
+
     return urlparse(url).hostname or "localhost"
 
 
 def _extract_db_port(url: str) -> int:
     from urllib.parse import urlparse
+
     return urlparse(url).port or 5432
 
 
 def _extract_db_user(url: str) -> str:
     from urllib.parse import urlparse
+
     return urlparse(url).username or "postgres"
 
 
 def _extract_db_password(url: str) -> str:
     from urllib.parse import urlparse
+
     return urlparse(url).password or ""
 
 
 def _extract_db_name(url: str) -> str:
     from urllib.parse import urlparse
+
     path = urlparse(url).path or "/"
     return path.lstrip("/") or "postgres"

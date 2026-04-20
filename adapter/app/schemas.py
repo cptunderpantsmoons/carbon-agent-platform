@@ -1,4 +1,5 @@
 """OpenAI-compatible request/response schemas."""
+
 from typing import Literal
 from pydantic import BaseModel, Field
 from datetime import datetime

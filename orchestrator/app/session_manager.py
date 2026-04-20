@@ -1,4 +1,5 @@
 """Session manager for handling Docker container lifecycle and user sessions."""
+
 import asyncio
 import weakref
 from datetime import datetime, timezone, timedelta
@@ -10,7 +11,7 @@ import structlog
 from app.models import User, UserStatus
 from app.docker_manager import DockerServiceManager
 from app.config import get_settings
-from app.database import create_session
+from app.database import provision_session
 
 logger = structlog.get_logger()
 
@@ -96,7 +97,9 @@ class SessionManager:
                 # provision it again so onboarding and manual recovery stay idempotent.
                 if user.status == UserStatus.ACTIVE:
                     try:
-                        container_status = await self.docker_manager.get_container_status(user_id)
+                        container_status = (
+                            await self.docker_manager.get_container_status(user_id)
+                        )
                     except Exception as e:
                         logger.warning(
                             "container_status_check_failed",
@@ -273,7 +276,7 @@ class SessionManager:
 
         try:
             container_status = await self.docker_manager.get_container_status(user_id)
-            
+
             return {
                 "user_id": user_id,
                 "status": container_status,
@@ -282,14 +285,6 @@ class SessionManager:
         except Exception as e:
             logger.error("get_service_status_error", user_id=user_id, error=str(e))
             return None
-
-    async def _get_db_session(self) -> AsyncSession:
-        """Create and return a new async database session.
-
-        Used by the cleanup task which operates independently of request
-        lifecycle. Delegates to database.create_session().
-        """
-        return create_session()
 
     async def provision_user_background(self, user_id: str) -> bool:
         """Provision a Docker container for a newly registered user.
@@ -309,17 +304,17 @@ class SessionManager:
         Raises:
             Exception: Re-raised so asyncio.create_task logs the exception.
         """
-        db = create_session()
         try:
             logger.info("starting_user_provisioning", user_id=user_id)
-            was_created, _ = await self.ensure_user_service(db, user_id)
+            async with provision_session() as db:
+                was_created, _ = await self.ensure_user_service(db, user_id)
 
-            if was_created:
-                logger.info("user_provisioned_successfully", user_id=user_id)
-            else:
-                logger.info("user_already_had_service", user_id=user_id)
+                if was_created:
+                    logger.info("user_provisioned_successfully", user_id=user_id)
+                else:
+                    logger.info("user_already_had_service", user_id=user_id)
 
-            return was_created
+                return was_created
         except Exception as e:
             logger.error(
                 "user_provisioning_failed",
@@ -328,8 +323,6 @@ class SessionManager:
                 error_type=type(e).__name__,
             )
             raise  # Re-raise so asyncio.create_task logs the exception
-        finally:
-            await db.close()
 
     async def spin_down_idle_user(self, user_id: str) -> bool:
         """Spin down an idle user's Docker container.
@@ -343,35 +336,33 @@ class SessionManager:
         Returns:
             True if service was spun down, False otherwise
         """
-        db = await self._get_db_session()
         try:
-            result = await db.execute(select(User).where(User.id == user_id))
-            user = result.scalar_one_or_none()
+            async with provision_session() as db:
+                result = await db.execute(select(User).where(User.id == user_id))
+                user = result.scalar_one_or_none()
 
-            if not user:
-                logger.error("idle_cleanup_user_not_found", user_id=user_id)
-                return False
+                if not user:
+                    logger.error("idle_cleanup_user_not_found", user_id=user_id)
+                    return False
 
-            if user.status != UserStatus.ACTIVE:
-                logger.info("idle_cleanup_no_service", user_id=user_id)
+                if user.status != UserStatus.ACTIVE:
+                    logger.info("idle_cleanup_no_service", user_id=user_id)
+                    if user_id in self._active_sessions:
+                        del self._active_sessions[user_id]
+                    return False
+
+                await self._spin_down_service(db, user, user_id)
+                await db.commit()
+
                 if user_id in self._active_sessions:
                     del self._active_sessions[user_id]
-                return False
 
-            await self._spin_down_service(db, user, user_id)
-            await db.commit()
-
-            if user_id in self._active_sessions:
-                del self._active_sessions[user_id]
-
-            logger.info("idle_user_spun_down", user_id=user_id)
-            return True
+                logger.info("idle_user_spun_down", user_id=user_id)
+                return True
 
         except Exception as e:
             logger.error("idle_spindown_error", user_id=user_id, error=str(e))
             return False
-        finally:
-            await db.close()
 
     async def _cleanup_idle_sessions(self) -> None:
         """Background task to clean up idle sessions."""
@@ -394,7 +385,9 @@ class SessionManager:
                         logger.info("user_idle_spinning_down", user_id=user_id)
                         await self.spin_down_idle_user(user_id)
                     except Exception as e:
-                        logger.error("idle_spindown_loop_error", user_id=user_id, error=str(e))
+                        logger.error(
+                            "idle_spindown_loop_error", user_id=user_id, error=str(e)
+                        )
 
             except asyncio.CancelledError:
                 logger.info("session_cleanup_task_cancelled")
@@ -426,7 +419,9 @@ class SessionManager:
         return {
             "user_id": user_id,
             "last_activity": last_activity,
-            "idle_seconds": (datetime.now(timezone.utc) - last_activity).total_seconds(),
+            "idle_seconds": (
+                datetime.now(timezone.utc) - last_activity
+            ).total_seconds(),
             "timeout_seconds": idle_timeout.total_seconds(),
         }
 

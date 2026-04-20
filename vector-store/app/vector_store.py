@@ -45,7 +45,9 @@ class VectorStore:
         if document_id is None:
             return where_filter
 
-        clauses = [{key: value} for key, value in where_filter.items() if key != "document_id"]
+        clauses = [
+            {key: value} for key, value in where_filter.items() if key != "document_id"
+        ]
         clauses.append(
             {
                 "$or": [
@@ -70,43 +72,50 @@ class VectorStore:
         """Add documents to the vector store in batches."""
         if not documents:
             return 0
-        
+
         # Generate IDs if not provided
         if ids is None:
             import uuid
+
             ids = [str(uuid.uuid4()) for _ in range(len(documents))]
-        
+
         # Check for existing IDs in the collection
-        existing_ids = set(self.collection.get()["ids"]) if self.collection.count() > 0 else set()
-        
+        existing_ids = (
+            set(self.collection.get()["ids"]) if self.collection.count() > 0 else set()
+        )
+
         # Filter out existing IDs
         unique_docs = []
         unique_metadatas = []
         unique_ids = []
-        
+
         for doc, meta, doc_id in zip(documents, metadatas, ids):
             if doc_id not in existing_ids:
                 unique_docs.append(doc)
                 unique_metadatas.append(meta)
                 unique_ids.append(doc_id)
-        
+
         if not unique_docs:
             print("No new documents to add (all already exist).")
             return 0
-        
+
         total = len(unique_docs)
-        print(f"Generating embeddings for {total} unique documents in batches of {batch_size}...")
-        
+        print(
+            f"Generating embeddings for {total} unique documents in batches of {batch_size}..."
+        )
+
         added_count = 0
         for i in range(0, total, batch_size):
             batch_end = min(i + batch_size, total)
             batch_texts = unique_docs[i:batch_end]
             batch_ids = unique_ids[i:batch_end]
             batch_metadatas = unique_metadatas[i:batch_end]
-            
-            print(f"  Batch {i//batch_size + 1}: embedding {len(batch_texts)} documents...")
+
+            print(
+                f"  Batch {i // batch_size + 1}: embedding {len(batch_texts)} documents..."
+            )
             embeddings = self._generate_embeddings(batch_texts)
-            
+
             self.collection.add(
                 ids=batch_ids,
                 documents=batch_texts,
@@ -115,7 +124,7 @@ class VectorStore:
             )
             added_count += len(batch_texts)
             print(f"  -> Added {added_count}/{total} total")
-        
+
         print(f"Done. Added {added_count} documents to vector store.")
         return added_count
 
@@ -128,36 +137,40 @@ class VectorStore:
         """Search the vector store for relevant documents."""
         query_embedding = self.embedding_model.encode([query]).tolist()
         chroma_where_filter = self._normalize_where_filter(where_filter)
-        
+
         search_params = {
             "query_embeddings": query_embedding,
             "n_results": n_results,
             "include": ["documents", "metadatas", "distances"],
         }
-        
+
         if chroma_where_filter:
             search_params["where"] = chroma_where_filter
-        
+
         results = self.collection.query(**search_params)
-        
+
         # Format results for API
         formatted_results = []
         if results and results.get("documents") and results["documents"][0]:
-            for i, (doc, metadata, distance) in enumerate(zip(
-                results["documents"][0],
-                results["metadatas"][0],
-                results["distances"][0],
-            )):
+            for i, (doc, metadata, distance) in enumerate(
+                zip(
+                    results["documents"][0],
+                    results["metadatas"][0],
+                    results["distances"][0],
+                )
+            ):
                 relevance_score = max(0, 100 - (distance * 100))
-                formatted_results.append({
-                    "rank": i + 1,
-                    "text": doc[:500] + "..." if len(doc) > 500 else doc,
-                    "full_text": doc,
-                    "metadata": metadata,
-                    "relevance_score": round(relevance_score, 1),
-                    "distance": float(distance),
-                })
-        
+                formatted_results.append(
+                    {
+                        "rank": i + 1,
+                        "text": doc[:500] + "..." if len(doc) > 500 else doc,
+                        "full_text": doc,
+                        "metadata": metadata,
+                        "relevance_score": round(relevance_score, 1),
+                        "distance": float(distance),
+                    }
+                )
+
         return {
             "query": query,
             "results": formatted_results,

@@ -4,6 +4,7 @@ Intercepts requests from the Open WebUI frontend, extracts the Clerk user ID
 from the session token, looks up the user's API key from the database, and
 rewrites the Authorization header before forwarding to the adapter.
 """
+
 import time
 
 from fastapi import Request, Response
@@ -49,9 +50,7 @@ async def _get_api_key_for_clerk_user(
             del _api_key_cache[clerk_user_id]
 
     # Look up in database
-    result = await db.execute(
-        select(User).where(User.clerk_user_id == clerk_user_id)
-    )
+    result = await db.execute(select(User).where(User.clerk_user_id == clerk_user_id))
     user = result.scalar_one_or_none()
 
     if not user:
@@ -122,10 +121,7 @@ class ApiKeyInjectionMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next) -> Response:
         """Rewrite Authorization header for adapter-bound requests."""
         path = request.url.path
-        is_adapter_request = (
-            path.startswith("/v1/") or
-            path.startswith("/adapter/")
-        )
+        is_adapter_request = path.startswith("/v1/") or path.startswith("/adapter/")
 
         if is_adapter_request:
             auth_header = request.headers.get("Authorization", "")
@@ -142,7 +138,9 @@ class ApiKeyInjectionMiddleware(BaseHTTPMiddleware):
                 return JSONResponse(status_code=401, content={"detail": detail})
 
             if not clerk_user_id:
-                return JSONResponse(status_code=401, content={"detail": "Invalid token"})
+                return JSONResponse(
+                    status_code=401, content={"detail": "Invalid token"}
+                )
 
             try:
                 db: AsyncSession = request.state.db  # type: ignore[attr-defined]
@@ -154,7 +152,9 @@ class ApiKeyInjectionMiddleware(BaseHTTPMiddleware):
                         clerk_user_id=clerk_user_id,
                         path=path,
                     )
-                    return JSONResponse(status_code=401, content={"detail": "Invalid token"})
+                    return JSONResponse(
+                        status_code=401, content={"detail": "Invalid token"}
+                    )
 
                 # Rewrite the Authorization header so the adapter receives the
                 # platform API key instead of the Clerk JWT. MutableHeaders
@@ -176,7 +176,9 @@ class ApiKeyInjectionMiddleware(BaseHTTPMiddleware):
                     error=str(e),
                     path=path,
                 )
-                return JSONResponse(status_code=401, content={"detail": "Invalid token"})
+                return JSONResponse(
+                    status_code=401, content={"detail": "Invalid token"}
+                )
 
         response = await call_next(request)
         return response

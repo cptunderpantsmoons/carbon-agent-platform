@@ -1,4 +1,5 @@
 """Clerk webhook handler for user lifecycle events."""
+
 import asyncio
 import json
 import secrets
@@ -9,7 +10,6 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from svix.webhooks import Webhook, WebhookVerificationError
 
-from app.database import get_session
 from app.models import User, AuditLog, UserStatus
 from app.config import get_settings
 from app.session_manager import get_session_manager
@@ -27,13 +27,13 @@ MAX_BODY_SIZE = 1_048_576  # 1 MiB
 
 def _prepare_webhook_secret(secret: str) -> str:
     """Prepare webhook secret for svix library.
-    
+
     Svix expects the base64-encoded secret. If the secret has the 'whsec_' prefix,
     strip it as svix handles the base64 decoding internally.
-    
+
     Args:
         secret: The webhook secret from environment variable.
-        
+
     Returns:
         The prepared secret for svix Webhook.
     """
@@ -74,11 +74,14 @@ def _verify_webhook_signature(
 
     try:
         wh = Webhook(prepared_secret)
-        wh.verify(payload, {
-            "svix-id": svix_id,
-            "svix-timestamp": svix_timestamp,
-            "svix-signature": svix_signature,
-        })
+        wh.verify(
+            payload,
+            {
+                "svix-id": svix_id,
+                "svix-timestamp": svix_timestamp,
+                "svix-signature": svix_signature,
+            },
+        )
         return True
     except WebhookVerificationError as e:
         logger.warning("clerk_webhook_invalid_signature", error=str(e))
@@ -90,9 +93,7 @@ def _verify_webhook_signature(
 
 async def _find_user_by_clerk_id(db: AsyncSession, clerk_user_id: str) -> User | None:
     """Find a user by their Clerk user ID."""
-    result = await db.execute(
-        select(User).where(User.clerk_user_id == clerk_user_id)
-    )
+    result = await db.execute(select(User).where(User.clerk_user_id == clerk_user_id))
     return result.scalar_one_or_none()
 
 

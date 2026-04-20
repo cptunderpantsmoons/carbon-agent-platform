@@ -1,11 +1,12 @@
 """Pydantic request/response schemas."""
+
 from datetime import datetime
-from typing import Any
 from pydantic import BaseModel, EmailStr, Field
 from app.models import UserStatus
 
 
 # --- User schemas ---
+
 
 class UserCreate(BaseModel):
     email: EmailStr
@@ -30,6 +31,7 @@ class UserWithApiKeyResponse(BaseModel):
     Only used for admin user creation and API key rotation,
     where the caller needs to see the key.
     """
+
     id: str
     email: str
     display_name: str
@@ -52,12 +54,14 @@ class ApiKeyRotateResponse(BaseModel):
 
     Only returned by POST /user/me/api-key/rotate endpoint.
     """
+
     status: str
     new_api_key: str
     message: str
 
 
 # --- Admin schemas ---
+
 
 class AdminCommand(BaseModel):
     command: str = Field(description="Natural language command for admin agent")
@@ -72,12 +76,14 @@ class AdminResponse(BaseModel):
 
 # --- Health schemas ---
 
+
 class PlatformHealth(BaseModel):
     total_users: int
     total_volumes: int
 
 
 # --- Docker schemas ---
+
 
 class DockerContainerResponse(BaseModel):
     id: str
@@ -98,6 +104,7 @@ class DockerContainerCreate(BaseModel):
 
 
 # --- Model Policy schemas ---
+
 
 class ModelPolicySchema(BaseModel):
     id: str

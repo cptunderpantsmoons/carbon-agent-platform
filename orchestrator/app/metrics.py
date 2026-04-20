@@ -6,6 +6,7 @@ Provides:
 
 Metrics exposed at /metrics endpoint for Prometheus scraping.
 """
+
 import time
 import uuid
 from collections import defaultdict
@@ -22,6 +23,7 @@ logger = structlog.get_logger(__name__)
 
 # --- Prometheus-style metrics (simple in-process counters) ---
 
+
 class MetricsRegistry:
     """Thread-safe in-process metrics registry.
 
@@ -35,17 +37,23 @@ class MetricsRegistry:
         self._histograms: dict[str, list[float]] = defaultdict(list)
         self._gauges: dict[str, float] = {}
 
-    def inc(self, name: str, labels: dict[str, str] | None = None, value: float = 1) -> None:
+    def inc(
+        self, name: str, labels: dict[str, str] | None = None, value: float = 1
+    ) -> None:
         """Increment a counter metric."""
         key = self._make_key(name, labels)
         self._counters[key] += value
 
-    def observe(self, name: str, value: float, labels: dict[str, str] | None = None) -> None:
+    def observe(
+        self, name: str, value: float, labels: dict[str, str] | None = None
+    ) -> None:
         """Observe a value for a histogram metric."""
         key = self._make_key(name, labels)
         self._histograms[key].append(value)
 
-    def set_gauge(self, name: str, value: float, labels: dict[str, str] | None = None) -> None:
+    def set_gauge(
+        self, name: str, value: float, labels: dict[str, str] | None = None
+    ) -> None:
         """Set a gauge metric to an arbitrary value."""
         key = self._make_key(name, labels)
         self._gauges[key] = value
@@ -93,6 +101,7 @@ metrics = MetricsRegistry()
 
 # --- Request ID Middleware ---
 
+
 class RequestIDMiddleware(BaseHTTPMiddleware):
     """Middleware that generates/propagates a request correlation ID.
 
@@ -122,7 +131,9 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
             # Record metrics
             path = request.url.path
             method = request.method
-            status_code = response.status_code if hasattr(response, "status_code") else 0
+            status_code = (
+                response.status_code if hasattr(response, "status_code") else 0
+            )
 
             metrics.inc(
                 "requests_total",
@@ -141,10 +152,13 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
 
 # --- Metrics Endpoint ---
 
+
 async def metrics_endpoint() -> PlainTextResponse:
     """FastAPI endpoint that exposes Prometheus-style metrics.
 
     Returns plaintext metrics in a format compatible with Prometheus scrape.
     """
     content = metrics.generate()
-    return PlainTextResponse(content, media_type="text/plain; version=0.0.4; charset=utf-8")
+    return PlainTextResponse(
+        content, media_type="text/plain; version=0.0.4; charset=utf-8"
+    )

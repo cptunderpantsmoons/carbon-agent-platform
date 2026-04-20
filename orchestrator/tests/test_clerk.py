@@ -1,4 +1,5 @@
 """Tests for Clerk webhook handler and authentication."""
+
 import json
 import uuid
 import time
@@ -12,24 +13,28 @@ import pytest_asyncio
 from svix.webhooks import Webhook
 
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
-from app.models import User, UserStatus, Base, AuditLog
+from app.models import User, UserStatus, Base
 
 
 # --- Test App Setup ---
 
+
 @pytest.fixture
 def clerk_test_app():
     """Create a minimal FastAPI app with Clerk webhook router for testing."""
-    from fastapi import FastAPI, Request
+    from fastapi import FastAPI
     from fastapi.middleware.cors import CORSMiddleware
     from starlette.middleware.base import BaseHTTPMiddleware
     from app.clerk import clerk_webhook_router
 
     class TestDBMiddleware(BaseHTTPMiddleware):
         """Provides a mock DB session via request.state."""
+
         async def dispatch(self, request, call_next):
             request.state.db = AsyncMock()
-            request.state.db.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=None)))
+            request.state.db.execute = AsyncMock(
+                return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=None))
+            )
             request.state.db.commit = AsyncMock()
             request.state.db.add = MagicMock()
             response = await call_next(request)
@@ -74,7 +79,9 @@ def _sign_webhook_payload(payload: bytes, secret: str = WEBHOOK_SECRET) -> dict:
     }
 
 
-def _make_webhook_payload(event_type: str, clerk_user_id: str, extra_data: dict | None = None) -> dict:
+def _make_webhook_payload(
+    event_type: str, clerk_user_id: str, extra_data: dict | None = None
+) -> dict:
     """Create a standard Clerk webhook payload."""
     data = {
         "id": clerk_user_id,
@@ -94,6 +101,7 @@ def _make_webhook_payload(event_type: str, clerk_user_id: str, extra_data: dict 
 
 
 # --- Database Fixtures ---
+
 
 @pytest_asyncio.fixture
 async def test_engine():
@@ -129,12 +137,14 @@ def test_user(test_db):
     )
     test_db.add(user)
     import asyncio
+
     asyncio.run(test_db.commit())
     asyncio.run(test_db.refresh(user))
     return user
 
 
 # --- Webhook Signature Verification Tests ---
+
 
 class TestWebhookSignatureVerification:
     """Tests for webhook signature verification using Svix."""
@@ -166,7 +176,9 @@ class TestWebhookSignatureVerification:
             payload = _make_webhook_payload("user.created", "user_new123")
             body = json.dumps(payload).encode("utf-8")
             headers = _sign_webhook_payload(body)
-            headers["svix-signature"] = "v1,g0hM9SsE+OTPJTDtR6QxvJah0JYJ7BEdd0fySUJHycQ="  # tampered but valid base64
+            headers["svix-signature"] = (
+                "v1,g0hM9SsE+OTPJTDtR6QxvJah0JYJ7BEdd0fySUJHycQ="  # tampered but valid base64
+            )
 
             response = client.post(
                 "/webhooks/clerk",
@@ -272,7 +284,10 @@ class TestWebhookSignatureVerification:
             mock_settings.return_value = MagicMock(clerk_webhook_secret=WEBHOOK_SECRET)
 
             # Create payload larger than 1 MiB
-            big_payload = {"type": "user.created", "data": {"id": "x", "pad": "A" * (2 * 1024 * 1024)}}
+            big_payload = {
+                "type": "user.created",
+                "data": {"id": "x", "pad": "A" * (2 * 1024 * 1024)},
+            }
             body = json.dumps(big_payload).encode("utf-8")
 
             response = client.post(
@@ -345,6 +360,7 @@ class TestWebhookSignatureVerification:
 
 
 # --- user.created Event Tests ---
+
 
 class TestUserCreatedEvent:
     """Tests for user.created webhook event processing."""
@@ -431,6 +447,7 @@ class TestUserCreatedEvent:
 
 # --- user.updated Event Tests ---
 
+
 class TestUserUpdatedEvent:
     """Tests for user.updated webhook event processing."""
 
@@ -476,13 +493,16 @@ class TestUserUpdatedEvent:
 
 # --- user.deleted Event Tests ---
 
+
 class TestUserDeletedEvent:
     """Tests for user.deleted webhook event processing."""
 
     def test_soft_delete_user(self, client):
         """Test that user.deleted soft-deletes the user."""
-        with patch("app.clerk.get_settings") as mock_settings, \
-             patch("app.clerk.get_session_manager") as mock_get_sm:
+        with (
+            patch("app.clerk.get_settings") as mock_settings,
+            patch("app.clerk.get_session_manager") as mock_get_sm,
+        ):
             mock_settings.return_value = MagicMock(clerk_webhook_secret=WEBHOOK_SECRET)
             mock_sm = MagicMock()
             mock_sm.spin_down_user_service = AsyncMock(return_value=True)
@@ -558,6 +578,7 @@ class TestUserDeletedEvent:
 
 # --- Helper Function Unit Tests ---
 
+
 class TestHelperFunctions:
     """Unit tests for internal helper functions."""
 
@@ -570,12 +591,15 @@ class TestHelperFunctions:
 
         with patch("app.clerk.get_settings") as mock_settings:
             mock_settings.return_value = MagicMock(clerk_webhook_secret=WEBHOOK_SECRET)
-            assert _verify_webhook_signature(
-                payload,
-                headers["svix-id"],
-                headers["svix-timestamp"],
-                headers["svix-signature"],
-            ) is True
+            assert (
+                _verify_webhook_signature(
+                    payload,
+                    headers["svix-id"],
+                    headers["svix-timestamp"],
+                    headers["svix-signature"],
+                )
+                is True
+            )
 
     def test_verify_webhook_signature_invalid(self):
         """Test invalid Svix signature verification."""
@@ -585,12 +609,15 @@ class TestHelperFunctions:
 
         with patch("app.clerk.get_settings") as mock_settings:
             mock_settings.return_value = MagicMock(clerk_webhook_secret=WEBHOOK_SECRET)
-            assert _verify_webhook_signature(
-                payload,
-                "msg_fake",
-                str(int(time.time())),
-                "v1,g0hM9SsE+OTPJTDtR6QxvJah0JYJ7BEdd0fySUJHycQ=",  # valid base64 but wrong signature
-            ) is False
+            assert (
+                _verify_webhook_signature(
+                    payload,
+                    "msg_fake",
+                    str(int(time.time())),
+                    "v1,g0hM9SsE+OTPJTDtR6QxvJah0JYJ7BEdd0fySUJHycQ=",  # valid base64 but wrong signature
+                )
+                is False
+            )
 
     def test_verify_webhook_signature_no_secret(self):
         """Test verification when no secret is configured returns 500."""
@@ -629,7 +656,7 @@ class TestHelperFunctions:
     def test_prepare_webhook_secret_with_prefix(self):
         """Test that whsec_ prefix is stripped from webhook secret."""
         from app.clerk import _prepare_webhook_secret
-        
+
         secret_with_prefix = "whsec_abc123def456"
         result = _prepare_webhook_secret(secret_with_prefix)
         assert result == "abc123def456"
@@ -638,7 +665,7 @@ class TestHelperFunctions:
     def test_prepare_webhook_secret_without_prefix(self):
         """Test that secret without prefix is returned unchanged."""
         from app.clerk import _prepare_webhook_secret
-        
+
         secret_without_prefix = "abc123def456"
         result = _prepare_webhook_secret(secret_without_prefix)
         assert result == "abc123def456"
@@ -646,19 +673,18 @@ class TestHelperFunctions:
     def test_prepare_webhook_secret_with_real_base64_secret(self):
         """Test preparing a real base64-encoded webhook secret."""
         from app.clerk import _prepare_webhook_secret
-        
+
         # This is how Clerk provides webhook secrets
         raw_secret = "dGVzdF9zZWNyZXRfa2V5XzEyMzQ1Njc4"
         secret_with_prefix = f"whsec_{raw_secret}"
-        
+
         result = _prepare_webhook_secret(secret_with_prefix)
         assert result == raw_secret
         assert not result.startswith("whsec_")
 
 
-
-
 # --- API Key Injection Middleware Tests ---
+
 
 class TestApiKeyInjectionMiddleware:
     """Tests for API key injection middleware."""
@@ -684,7 +710,10 @@ class TestApiKeyInjectionMiddleware:
         mock_request.app = MagicMock()
         mock_request.app.dependency_overrides = {}
 
-        with patch("app.api_key_injection.verify_clerk_token", new=AsyncMock(return_value={"sub": "user_test123"})):
+        with patch(
+            "app.api_key_injection.verify_clerk_token",
+            new=AsyncMock(return_value={"sub": "user_test123"}),
+        ):
             user_id = await _extract_clerk_user_id_from_request(mock_request)
         assert user_id == "user_test123"
 
@@ -783,7 +812,9 @@ class TestApiKeyInjectionMiddleware:
 
         with patch(
             "app.api_key_injection._extract_clerk_user_id_from_request",
-            new=AsyncMock(side_effect=HTTPException(status_code=401, detail="Invalid token")),
+            new=AsyncMock(
+                side_effect=HTTPException(status_code=401, detail="Invalid token")
+            ),
         ):
             response = await middleware.dispatch(request, call_next)
 

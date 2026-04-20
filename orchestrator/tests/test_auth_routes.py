@@ -1,4 +1,5 @@
 """Tests for auth routes - Clerk-based API key retrieval."""
+
 from datetime import datetime, timedelta, timezone
 import json
 
@@ -20,7 +21,9 @@ def _generate_rsa_keypair() -> tuple[rsa.RSAPrivateKey, dict]:
         key_size=2048,
         backend=default_backend(),
     )
-    public_jwk = json.loads(jwt.algorithms.RSAAlgorithm.to_jwk(private_key.public_key()))
+    public_jwk = json.loads(
+        jwt.algorithms.RSAAlgorithm.to_jwk(private_key.public_key())
+    )
     public_jwk.update({"kid": "test-kid", "alg": "RS256", "use": "sig"})
     return private_key, {"keys": [public_jwk]}
 
@@ -106,7 +109,10 @@ async def test_get_api_key_success(auth_client, seed_clerk_user, signing_materia
         headers={"Authorization": f"Bearer {token}"},
     )
     assert response.status_code == 200
-    assert response.json() == {"api_key": "sk-clerk-test-key-abc123", "user_id": "clerk-user-001"}
+    assert response.json() == {
+        "api_key": "sk-clerk-test-key-abc123",
+        "user_id": "clerk-user-001",
+    }
 
 
 @pytest.mark.asyncio
@@ -117,13 +123,17 @@ async def test_get_api_key_missing_auth_header(auth_client):
 
 
 @pytest.mark.asyncio
-async def test_get_api_key_rejects_tampered_signature(auth_client, seed_clerk_user, signing_material):
+async def test_get_api_key_rejects_tampered_signature(
+    auth_client, seed_clerk_user, signing_material
+):
     private_key, _ = signing_material
-    valid_token = _make_clerk_token(private_key, "user_clerk_123", email="clerk@test.com")
+    valid_token = _make_clerk_token(
+        private_key, "user_clerk_123", email="clerk@test.com"
+    )
     header_part, payload_part, signature_part = valid_token.split(".")
     mid = len(signature_part) // 2
     flipped = "A" if signature_part[mid] != "A" else "B"
-    tampered_signature = f"{signature_part[:mid]}{flipped}{signature_part[mid + 1:]}"
+    tampered_signature = f"{signature_part[:mid]}{flipped}{signature_part[mid + 1 :]}"
     tampered_token = ".".join([header_part, payload_part, tampered_signature])
     response = await auth_client.get(
         "/api/v1/auth/get-api-key",
@@ -134,7 +144,9 @@ async def test_get_api_key_rejects_tampered_signature(auth_client, seed_clerk_us
 
 
 @pytest.mark.asyncio
-async def test_get_api_key_rejects_expired_token(auth_client, seed_clerk_user, signing_material):
+async def test_get_api_key_rejects_expired_token(
+    auth_client, seed_clerk_user, signing_material
+):
     private_key, _ = signing_material
     expired_token = _make_clerk_token(
         private_key,
@@ -151,7 +163,9 @@ async def test_get_api_key_rejects_expired_token(auth_client, seed_clerk_user, s
 
 
 @pytest.mark.asyncio
-async def test_get_api_key_rejects_nbf_in_future(auth_client, seed_clerk_user, signing_material):
+async def test_get_api_key_rejects_nbf_in_future(
+    auth_client, seed_clerk_user, signing_material
+):
     private_key, _ = signing_material
     nbf_future_token = _make_clerk_token(
         private_key,
@@ -168,7 +182,9 @@ async def test_get_api_key_rejects_nbf_in_future(auth_client, seed_clerk_user, s
 
 
 @pytest.mark.asyncio
-async def test_get_api_key_rejects_unknown_kid(auth_client, seed_clerk_user, signing_material):
+async def test_get_api_key_rejects_unknown_kid(
+    auth_client, seed_clerk_user, signing_material
+):
     private_key, _ = signing_material
     unknown_kid_token = _make_clerk_token(
         private_key,
@@ -229,14 +245,19 @@ async def test_get_api_key_email_fallback(auth_client, db_session, signing_mater
     await db_session.commit()
 
     private_key, _ = signing_material
-    token = _make_clerk_token(private_key, "user_new_clerk_id", email="fallback@test.com")
+    token = _make_clerk_token(
+        private_key, "user_new_clerk_id", email="fallback@test.com"
+    )
 
     response = await auth_client.get(
         "/api/v1/auth/get-api-key",
         headers={"Authorization": f"Bearer {token}"},
     )
     assert response.status_code == 200
-    assert response.json() == {"api_key": "sk-fallback-key", "user_id": "email-user-001"}
+    assert response.json() == {
+        "api_key": "sk-fallback-key",
+        "user_id": "email-user-001",
+    }
 
     await db_session.refresh(user)
     assert user.clerk_user_id == "user_new_clerk_id"
@@ -245,7 +266,9 @@ async def test_get_api_key_email_fallback(auth_client, db_session, signing_mater
 @pytest.mark.asyncio
 async def test_clerk_status_endpoint():
     response_transport = ASGITransport(app=app)
-    async with AsyncClient(transport=response_transport, base_url="http://test") as client:
+    async with AsyncClient(
+        transport=response_transport, base_url="http://test"
+    ) as client:
         response = await client.get("/api/v1/auth/clerk-status")
     assert response.status_code == 200
     payload = response.json()

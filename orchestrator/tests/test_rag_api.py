@@ -1,4 +1,5 @@
 """Tests for the Clerk-authenticated RAG gateway."""
+
 from datetime import datetime, timedelta, timezone
 import json
 from unittest.mock import patch
@@ -25,7 +26,9 @@ def _generate_rsa_keypair() -> tuple[rsa.RSAPrivateKey, dict]:
         key_size=2048,
         backend=default_backend(),
     )
-    public_jwk = json.loads(jwt.algorithms.RSAAlgorithm.to_jwk(private_key.public_key()))
+    public_jwk = json.loads(
+        jwt.algorithms.RSAAlgorithm.to_jwk(private_key.public_key())
+    )
     public_jwk.update({"kid": "rag-test-kid", "alg": "RS256", "use": "sig"})
     return private_key, {"keys": [public_jwk]}
 
@@ -110,7 +113,9 @@ def _build_mock_vector_store_client(
 
 
 @pytest.mark.asyncio
-async def test_rag_query_accepts_valid_clerk_token_without_platform_user_row(rag_client, signing_material):
+async def test_rag_query_accepts_valid_clerk_token_without_platform_user_row(
+    rag_client, signing_material
+):
     private_key, _ = signing_material
     token = _make_clerk_token(private_key, "clerk-user-001")
     captured_requests: list[dict] = []
@@ -118,7 +123,9 @@ async def test_rag_query_accepts_valid_clerk_token_without_platform_user_row(rag
         captured_requests,
         response_json={
             "query": "Find the contract clause about renewal.",
-            "results": [{"rank": 1, "text": "renewal clause", "metadata": {"doc_id": "doc-1"}}],
+            "results": [
+                {"rank": 1, "text": "renewal clause", "metadata": {"doc_id": "doc-1"}}
+            ],
             "total_found": 1,
         },
     )
@@ -169,7 +176,9 @@ async def test_rag_query_rejects_missing_bearer_token(rag_client):
 
 
 @pytest.mark.asyncio
-async def test_rag_query_returns_scoped_payload_result_shape(rag_client, signing_material):
+async def test_rag_query_returns_scoped_payload_result_shape(
+    rag_client, signing_material
+):
     private_key, _ = signing_material
     token = _make_clerk_token(private_key, "clerk-user-002")
     captured_requests: list[dict] = []
@@ -325,7 +334,9 @@ async def test_rag_query_denies_suspended_carbon_user_row_with_matching_clerk_id
     await db_session.commit()
 
     private_key, _ = signing_material
-    token = _make_clerk_token(private_key, "clerk-user-email", email="matched-by-email@example.com")
+    token = _make_clerk_token(
+        private_key, "clerk-user-email", email="matched-by-email@example.com"
+    )
 
     response = await rag_client.post(
         "/api/v1/rag/query",
@@ -338,7 +349,9 @@ async def test_rag_query_denies_suspended_carbon_user_row_with_matching_clerk_id
 
 
 @pytest.mark.asyncio
-async def test_rag_query_returns_503_when_vector_store_unavailable(rag_client, signing_material):
+async def test_rag_query_returns_503_when_vector_store_unavailable(
+    rag_client, signing_material
+):
     private_key, _ = signing_material
     token = _make_clerk_token(private_key, "clerk-user-003")
     captured_requests: list[dict] = []
@@ -362,7 +375,9 @@ async def test_rag_query_returns_503_when_vector_store_unavailable(rag_client, s
 
 
 @pytest.mark.asyncio
-async def test_rag_delete_returns_503_when_vector_store_unavailable(rag_client, signing_material):
+async def test_rag_delete_returns_503_when_vector_store_unavailable(
+    rag_client, signing_material
+):
     private_key, _ = signing_material
     token = _make_clerk_token(private_key, "clerk-user-delete-unavailable")
     captured_requests: list[dict] = []
@@ -385,7 +400,9 @@ async def test_rag_delete_returns_503_when_vector_store_unavailable(rag_client, 
 
 
 @pytest.mark.asyncio
-async def test_rag_stats_returns_502_when_vector_store_errors(rag_client, signing_material):
+async def test_rag_stats_returns_502_when_vector_store_errors(
+    rag_client, signing_material
+):
     private_key, _ = signing_material
     token = _make_clerk_token(private_key, "clerk-user-stats-error")
     captured_requests: list[dict] = []
@@ -410,7 +427,9 @@ async def test_rag_stats_returns_502_when_vector_store_errors(rag_client, signin
 
 
 @pytest.mark.asyncio
-async def test_rag_query_rejects_azp_mismatch_when_authorized_origins_configured(rag_client, signing_material):
+async def test_rag_query_rejects_azp_mismatch_when_authorized_origins_configured(
+    rag_client, signing_material
+):
     private_key, _ = signing_material
     token = _make_clerk_token(
         private_key,
@@ -429,7 +448,9 @@ async def test_rag_query_rejects_azp_mismatch_when_authorized_origins_configured
 
 
 @pytest.mark.asyncio
-async def test_rag_query_is_rate_limited_per_verified_clerk_user(rag_client, signing_material):
+async def test_rag_query_is_rate_limited_per_verified_clerk_user(
+    rag_client, signing_material
+):
     private_key, _ = signing_material
     token_one = _make_clerk_token(private_key, "clerk-user-rate-limit-1")
     token_two = _make_clerk_token(private_key, "clerk-user-rate-limit-2")
@@ -446,7 +467,9 @@ async def test_rag_query_is_rate_limited_per_verified_clerk_user(rag_client, sig
             },
         )
 
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
         with patch("app.rag.httpx.AsyncClient", side_effect=fake_client_ctor):
             last_response = None
             for _ in range(60):

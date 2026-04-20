@@ -1,12 +1,12 @@
 import sys
 
-with open('rag.py', 'r', encoding='utf-8') as f:
+with open("rag.py", "r", encoding="utf-8") as f:
     lines = f.readlines()
 
 # Find the line where delete endpoint starts
 delete_idx = None
 for i, line in enumerate(lines):
-    if line.strip().startswith('@rag_router.delete'):
+    if line.strip().startswith("@rag_router.delete"):
         delete_idx = i
         break
 
@@ -68,9 +68,9 @@ async def ingest_rag(
 '''
 
 # Insert with a blank line before delete
-lines.insert(delete_idx, '\n' + new_endpoint)
+lines.insert(delete_idx, "\n" + new_endpoint)
 
-with open('rag.py', 'w', encoding='utf-8') as f:
+with open("rag.py", "w", encoding="utf-8") as f:
     f.writelines(lines)
 
 print("Ingest endpoint added successfully.")

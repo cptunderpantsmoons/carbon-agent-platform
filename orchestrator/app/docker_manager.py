@@ -3,6 +3,7 @@
 Replaces Railway API calls with direct Docker socket management,
 enabling self-hosted PaaS functionality on a VPS.
 """
+
 import docker
 from docker.errors import DockerException, NotFound, APIError
 from docker.types import LogConfig
@@ -31,15 +32,30 @@ class DockerServiceManager:
     - Traefik path-based routing labels
     - Security isolation (read-only filesystem, tmpfs)
     - Automatic restart policies
+
+    The Docker client is initialised lazily on first use so that importing
+    this module (or constructing DockerServiceManager) does not fail in
+    environments without a running Docker daemon (e.g. CI, unit tests).
     """
 
     def __init__(self):
-        try:
-            self.client = docker.from_env()
-            logger.info("DockerServiceManager initialized: Connected to Docker Daemon")
-        except DockerException as e:
-            logger.error(f"Failed to connect to Docker Daemon: {e}")
-            raise
+        self._client: Optional[docker.DockerClient] = None
+        logger.info("DockerServiceManager initialised (lazy Docker connection)")
+
+    def _get_client(self) -> docker.DockerClient:
+        """Return the Docker client, connecting lazily on first call.
+
+        Raises:
+            DockerException: If the Docker daemon is unreachable.
+        """
+        if self._client is None:
+            try:
+                self._client = docker.from_env()
+                logger.info("DockerServiceManager: connected to Docker daemon")
+            except DockerException as e:
+                logger.error(f"Failed to connect to Docker daemon: {e}")
+                raise
+        return self._client
 
     async def ensure_user_service(
         self, user_id: str, env_vars: Dict[str, str]
@@ -56,7 +72,7 @@ class DockerServiceManager:
         container_name = f"agent-{user_id}"
 
         try:
-            container = self.client.containers.get(container_name)
+            container = self._get_client().containers.get(container_name)
 
             if container.status != "running":
                 logger.info(f"Starting stopped container for user {user_id}")
@@ -115,7 +131,9 @@ class DockerServiceManager:
             f"traefik.http.routers.{user_id}.tls": "true",
             f"traefik.http.routers.{user_id}.middlewares": f"{user_id}-strip",
             f"traefik.http.middlewares.{user_id}-strip.stripprefix.prefixes": f"{AGENT_BASE_PATH}/{user_id}",
-            f"traefik.http.services.{user_id}.loadbalancer.server.port": str(ADAPTER_PORT),
+            f"traefik.http.services.{user_id}.loadbalancer.server.port": str(
+                ADAPTER_PORT
+            ),
             # Carbon Agent Metadata
             "carbon.user_id": user_id,
             "carbon.type": "agent-instance",
@@ -124,12 +142,12 @@ class DockerServiceManager:
         try:
             # Ensure network exists
             try:
-                self.client.networks.get(DOCKER_NETWORK)
+                self._get_client().networks.get(DOCKER_NETWORK)
             except NotFound:
                 logger.info(f"Creating Docker network: {DOCKER_NETWORK}")
-                self.client.networks.create(DOCKER_NETWORK, driver="bridge")
+                self._get_client().networks.create(DOCKER_NETWORK, driver="bridge")
 
-            container = self.client.containers.run(
+            container = self._get_client().containers.run(
                 image=BASE_IMAGE,
                 name=container_name,
                 environment=container_env,
@@ -167,7 +185,7 @@ class DockerServiceManager:
         """
         container_name = f"agent-{user_id}"
         try:
-            container = self.client.containers.get(container_name)
+            container = self._get_client().containers.get(container_name)
             if container.status == "running":
                 container.stop(timeout=10)
                 logger.info(f"Container stopped for user {user_id}")
@@ -182,7 +200,7 @@ class DockerServiceManager:
         """
         container_name = f"agent-{user_id}"
         try:
-            container = self.client.containers.get(container_name)
+            container = self._get_client().containers.get(container_name)
             container.remove(force=True)
             logger.info(f"Container destroyed for user {user_id}")
         except NotFound:
@@ -199,7 +217,7 @@ class DockerServiceManager:
         """
         container_name = f"agent-{user_id}"
         try:
-            container = self.client.containers.get(container_name)
+            container = self._get_client().containers.get(container_name)
             return container.status
         except NotFound:
             return "missing"

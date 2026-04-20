@@ -5,10 +5,10 @@ Provides:
 - /v1/agent/run          (new internal execution path)
 - /v1/models, /v1/user, /health, /metrics
 """
-import time
+
 import uuid
 from fastapi import FastAPI, HTTPException, Depends
-from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi.responses import StreamingResponse
 import structlog
 
 from app.schemas import (
@@ -19,7 +19,7 @@ from app.schemas import (
 )
 from app.streaming import fake_stream_response
 from app.config import get_settings
-from app.auth import verify_api_key, get_db
+from app.auth import verify_api_key
 from app.models import User, UserStatus
 from app.metrics import RequestIDMiddleware, metrics_endpoint
 
@@ -34,7 +34,6 @@ from app.runtime import (
 
 # Legacy imports — kept during transition, will be removed in Wave 5
 from app.agent_client import AgentClient
-from app.llm_provider import create_provider
 
 logger = structlog.get_logger()
 app = FastAPI(title="Carbon Agent OpenAI Adapter", version="2.1.0")
@@ -137,7 +136,6 @@ async def chat_completions(
 
     # ── New pydantic-ai runtime path ─────────────────────────────────────────
     trace_id = str(uuid.uuid4())
-    start = time.monotonic()
 
     runtime_request = AgentExecutionRequest(
         user_id=user.id,

@@ -9,7 +9,7 @@
 #   2. Copy the multi-arch index digest (sha256:...)
 #   3. Update the digest below
 #   4. Rebuild: docker compose build open-webui
-#   Last updated: 2026-04-20
+#   Last updated: 2026-04-21
 FROM ghcr.io/open-webui/open-webui:main@sha256:b8095f79a6a8ffad8f830bdacc9b5b0aef805689b31bca0b065cc2424d3cfaeb
 
 LABEL maintainer="Carbon Agent Platform"

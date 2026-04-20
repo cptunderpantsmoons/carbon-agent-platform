@@ -1,4 +1,5 @@
 """Environment configuration for the orchestrator."""
+
 from pydantic_settings import BaseSettings
 from functools import lru_cache
 
@@ -8,7 +9,9 @@ class Settings(BaseSettings):
     docker_network: str = "carbon-agent-net"
     agent_docker_image: str = "carbon-agent-adapter:latest"
     agent_memory_limit: str = "512m"  # Per-user RAM limit (e.g., "512m", "1g")
-    agent_cpu_nanos: int = 500000000  # Per-user CPU limit in nanos (500000000 = 0.5 CPU)
+    agent_cpu_nanos: int = (
+        500000000  # Per-user CPU limit in nanos (500000000 = 0.5 CPU)
+    )
     adapter_port: int = 8001  # Port the adapter listens on inside container
 
     # Traefik (reverse proxy)
@@ -46,7 +49,9 @@ class Settings(BaseSettings):
     clerk_frontend_api_url: str = ""  # e.g. https://xxx.clerk.accounts.dev
     clerk_webhook_secret: str = ""
     clerk_jwt_public_key: str = ""  # Optional; fetched from JWKS endpoint if absent
-    clerk_jwt_issuer: str = ""      # e.g. https://xxx.clerk.accounts.dev -- enables iss verification
+    clerk_jwt_issuer: str = (
+        ""  # e.g. https://xxx.clerk.accounts.dev -- enables iss verification
+    )
     clerk_authorized_origins: str = ""  # Comma-separated list of authorized origins
 
     # RAG gateway

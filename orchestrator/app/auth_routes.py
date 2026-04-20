@@ -3,6 +3,7 @@
 Provides the /api/v1/auth/get-api-key endpoint used by the Open WebUI
 clerk-integration.js to fetch the user's API key after Clerk authentication.
 """
+
 from fastapi import APIRouter, Depends, HTTPException, Header, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -41,7 +42,9 @@ async def get_api_key(
         HTTPException: If authentication fails or user not found.
     """
     if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Missing or invalid Authorization header")
+        raise HTTPException(
+            status_code=401, detail="Missing or invalid Authorization header"
+        )
 
     token = authorization[7:]
 
@@ -55,9 +58,7 @@ async def get_api_key(
         raise HTTPException(status_code=401, detail="Invalid token: missing user ID")
 
     # Look up the user's API key
-    result = await db.execute(
-        select(User).where(User.clerk_user_id == clerk_user_id)
-    )
+    result = await db.execute(select(User).where(User.clerk_user_id == clerk_user_id))
     user = result.scalar_one_or_none()
 
     if not user:
@@ -76,7 +77,9 @@ async def get_api_key(
     if user.status != UserStatus.ACTIVE:
         raise HTTPException(status_code=403, detail="User account is not active")
 
-    logger.info("api_key_retrieved_via_clerk", user_id=user.id, clerk_user_id=clerk_user_id)
+    logger.info(
+        "api_key_retrieved_via_clerk", user_id=user.id, clerk_user_id=clerk_user_id
+    )
 
     return {"api_key": user.api_key, "user_id": user.id}
 

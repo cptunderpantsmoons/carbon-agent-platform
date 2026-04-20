@@ -4,14 +4,20 @@
 - benchmark_agent: Single-run evaluation execution
 - task_agent: MCP/tool-enabled agentic workflows
 """
+
 import time
 import uuid
 from datetime import datetime, timezone
-from typing import Optional
 
 import structlog
-from pydantic_ai import Agent, RunContext, ModelSettings
-from pydantic_ai.messages import ModelMessage, ModelRequest, ModelResponse, TextPart, UserPromptPart
+from pydantic_ai import Agent, ModelSettings
+from pydantic_ai.messages import (
+    ModelMessage,
+    ModelRequest,
+    ModelResponse,
+    TextPart,
+    UserPromptPart,
+)
 
 from .dependencies import RuntimeDeps
 from .responses import AgentExecutionRequest, AgentExecutionResult, ChatMessage
@@ -23,7 +29,11 @@ from .tools import get_registered_tools
 from .state import get_conversation_state, ConversationMessage
 from .normalize import normalize_response
 from .policy_client import get_policy_client
-from ..temperature_detector import detect_and_apply_temperature, detect_task_type, get_task_description
+from ..temperature_detector import (
+    detect_and_apply_temperature,
+    detect_task_type,
+    get_task_description,
+)
 
 logger = structlog.get_logger()
 
@@ -43,7 +53,7 @@ def _convert_messages(history: list[ChatMessage]) -> list[ModelMessage]:
 def _build_system_prompt(deps: RuntimeDeps, task_type: str, task_desc: str) -> str:
     """Build a system prompt from runtime dependencies."""
     lines = [
-        f"You are the Corporate Carbon Intelligence Hub agent.",
+        "You are the Corporate Carbon Intelligence Hub agent.",
         f"Task type: {task_desc}",
         f"User: {deps.user.user_id}",
         f"Tenant: {deps.tenant.tenant_id}",
@@ -53,7 +63,9 @@ def _build_system_prompt(deps: RuntimeDeps, task_type: str, task_desc: str) -> s
     return "\n".join(lines)
 
 
-def _build_model_settings(request: AgentExecutionRequest, temperature: float) -> ModelSettings:
+def _build_model_settings(
+    request: AgentExecutionRequest, temperature: float
+) -> ModelSettings:
     """Translate OpenAI-style request options into pydantic-ai model settings."""
     settings = ModelSettings()
     settings["temperature"] = temperature
@@ -97,7 +109,9 @@ async def create_chat_agent(
         model,
         deps_type=RuntimeDeps,
         result_type=str,
-        system_prompt=_build_system_prompt(deps, request.task_type, "General conversation"),
+        system_prompt=_build_system_prompt(
+            deps, request.task_type, "General conversation"
+        ),
         tools=tools,
     )
 
@@ -168,7 +182,9 @@ async def create_task_agent(
         model,
         deps_type=RuntimeDeps,
         result_type=str,
-        system_prompt=_build_system_prompt(deps, request.task_type, "Agentic task execution"),
+        system_prompt=_build_system_prompt(
+            deps, request.task_type, "Agentic task execution"
+        ),
         tools=tools,
     )
 
@@ -214,7 +230,9 @@ async def execute_agent_run(
             routing_mode=fetched_policy.routing_mode,
         )
     except Exception as e:
-        logger.warning("policy_fetch_failed_using_defaults", trace_id=trace_id, error=str(e))
+        logger.warning(
+            "policy_fetch_failed_using_defaults", trace_id=trace_id, error=str(e)
+        )
 
     # Normalize legacy placeholder model names before agent construction.
     _, resolved_model = resolve_provider_and_model(
@@ -268,8 +286,7 @@ async def execute_agent_run(
         state = await convo_store.get(deps.user.user_id, request.conversation_id)
         if state:
             history = [
-                ChatMessage(role=m.role, content=m.content)
-                for m in state.messages
+                ChatMessage(role=m.role, content=m.content) for m in state.messages
             ]
             message_history = _convert_messages(history)
         else:
@@ -326,7 +343,9 @@ async def execute_agent_run(
             ),
             ConversationMessage(
                 role="assistant",
-                content=result.data if isinstance(result.data, str) else str(result.data),
+                content=result.data
+                if isinstance(result.data, str)
+                else str(result.data),
                 timestamp=now,
             ),
         ]

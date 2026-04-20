@@ -1,4 +1,5 @@
 """Integration test fixtures."""
+
 import sys
 import os
 

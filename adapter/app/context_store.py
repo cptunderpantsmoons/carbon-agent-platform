@@ -9,6 +9,7 @@ Redis provides:
 - TTL-based expiration (matches default_lifetime_hours)
 - Atomic operations
 """
+
 import structlog
 from app.config import get_settings
 
@@ -93,9 +94,7 @@ class ContextStore:
         r = await self._get_redis()
         if r:
             try:
-                await r.setex(
-                    f"context:{user_id}", self._ttl_seconds, context_id
-                )
+                await r.setex(f"context:{user_id}", self._ttl_seconds, context_id)
                 # Also update in-memory for fast local reads
                 self._memory[user_id] = context_id
                 return

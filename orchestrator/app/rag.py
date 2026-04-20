@@ -1,4 +1,5 @@
 """Clerk-authenticated RAG gateway routes."""
+
 from collections.abc import Mapping
 from typing import Any
 
@@ -112,10 +113,14 @@ async def _proxy_scoped_vector_store_request(
     settings = get_settings()
 
     try:
-        async with httpx.AsyncClient(base_url=settings.vector_store_url, timeout=10.0) as client:
+        async with httpx.AsyncClient(
+            base_url=settings.vector_store_url, timeout=10.0
+        ) as client:
             response = await client.post(path, json=upstream_payload)
     except httpx.RequestError as exc:
-        raise HTTPException(status_code=503, detail="Vector store service unavailable") from exc
+        raise HTTPException(
+            status_code=503, detail="Vector store service unavailable"
+        ) from exc
 
     if response.status_code >= 400:
         raise HTTPException(
@@ -126,7 +131,9 @@ async def _proxy_scoped_vector_store_request(
     try:
         downstream_result = response.json()
     except ValueError as exc:
-        raise HTTPException(status_code=502, detail="Vector store returned invalid JSON") from exc
+        raise HTTPException(
+            status_code=502, detail="Vector store returned invalid JSON"
+        ) from exc
 
     return {
         "scope": scoped_request["scope"],
@@ -137,7 +144,10 @@ async def _proxy_scoped_vector_store_request(
 
 def _ensure_active_principal(principal: ClerkPrincipal) -> None:
     """Reject suspended or inactive Carbon users from Contract Hub RAG access."""
-    if principal.get("carbon_user_status") and principal["carbon_user_status"] != "active":
+    if (
+        principal.get("carbon_user_status")
+        and principal["carbon_user_status"] != "active"
+    ):
         raise HTTPException(status_code=403, detail="User account is not active")
 
 
@@ -166,7 +176,6 @@ async def query_rag(
     tenant_id = _get_tenant_id_from_request(request)
     scoped_request = build_scoped_rag_request(payload, principal, tenant_id)
     return await proxy_rag_request(scoped_request)
-
 
 
 @rag_router.post("/ingest")
@@ -208,7 +217,10 @@ async def ingest_rag(
         ids.append(doc.get("id", str(uuid.uuid4())))
 
     upstream_payload = {
-        "documents": [{"text": text, "metadata": metadata} for text, metadata in zip(texts, metadatas)],
+        "documents": [
+            {"text": text, "metadata": metadata}
+            for text, metadata in zip(texts, metadatas)
+        ],
         "ids": ids,
         "batch_size": payload.get("batch_size", 500),
     }
@@ -220,6 +232,7 @@ async def ingest_rag(
         scoped_request=scoped_request,
         upstream_payload=upstream_payload,
     )
+
 
 @rag_router.delete("/documents/{document_id}")
 @limiter.limit("60/minute", key_func=_get_clerk_rag_rate_limit_key)

@@ -6,6 +6,7 @@ Manages scheduled background tasks for platform management:
 - Audit log cleanup
 - Database health checks
 """
+
 import asyncio
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, Any, List
@@ -60,7 +61,9 @@ class Scheduler:
         if self._tasks:
             results = await asyncio.gather(*self._tasks, return_exceptions=True)
             for result in results:
-                if isinstance(result, Exception) and not isinstance(result, asyncio.CancelledError):
+                if isinstance(result, Exception) and not isinstance(
+                    result, asyncio.CancelledError
+                ):
                     logger.error("scheduler_task_error_during_stop", error=str(result))
 
         self._tasks.clear()
@@ -77,7 +80,10 @@ class Scheduler:
         settings = get_settings()
         interval_seconds = settings.health_check_interval_minutes * 60
 
-        logger.info("health_monitor_loop_started", interval_minutes=settings.health_check_interval_minutes)
+        logger.info(
+            "health_monitor_loop_started",
+            interval_minutes=settings.health_check_interval_minutes,
+        )
 
         while self._running:
             try:
@@ -123,7 +129,9 @@ class Scheduler:
 
             for user in users_with_services:
                 try:
-                    container_status = await docker_manager.get_container_status(user.id)
+                    container_status = await docker_manager.get_container_status(
+                        user.id
+                    )
 
                     if container_status == "running":
                         results["healthy"] += 1
@@ -198,7 +206,10 @@ class Scheduler:
         settings = get_settings()
         interval_seconds = settings.analytics_interval_minutes * 60
 
-        logger.info("analytics_loop_started", interval_minutes=settings.analytics_interval_minutes)
+        logger.info(
+            "analytics_loop_started",
+            interval_minutes=settings.analytics_interval_minutes,
+        )
 
         while self._running:
             try:
@@ -266,10 +277,14 @@ class Scheduler:
 
             # Count service spin-up/spin-down events
             spin_up_count = await db.execute(
-                select(func.count(AuditLog.id)).where(AuditLog.action == "service_created")
+                select(func.count(AuditLog.id)).where(
+                    AuditLog.action == "service_created"
+                )
             )
             spin_down_count = await db.execute(
-                select(func.count(AuditLog.id)).where(AuditLog.action == "service_deleted")
+                select(func.count(AuditLog.id)).where(
+                    AuditLog.action == "service_deleted"
+                )
             )
             metrics["service_spin_ups"] = spin_up_count.scalar() or 0
             metrics["service_spin_downs"] = spin_down_count.scalar() or 0
@@ -300,7 +315,10 @@ class Scheduler:
         settings = get_settings()
         interval_seconds = settings.audit_cleanup_interval_hours * 3600
 
-        logger.info("audit_cleanup_loop_started", interval_hours=settings.audit_cleanup_interval_hours)
+        logger.info(
+            "audit_cleanup_loop_started",
+            interval_hours=settings.audit_cleanup_interval_hours,
+        )
 
         while self._running:
             try:
@@ -329,7 +347,9 @@ class Scheduler:
 
         db = await self._get_db_session()
         settings = get_settings()
-        cutoff_date = datetime.now(timezone.utc) - timedelta(days=settings.audit_retention_days)
+        cutoff_date = datetime.now(timezone.utc) - timedelta(
+            days=settings.audit_retention_days
+        )
 
         results = {
             "cutoff_date": cutoff_date.isoformat(),
@@ -466,7 +486,7 @@ class Scheduler:
                     User.status == UserStatus.ACTIVE,
                 )
             )
-            health["active_users"] = orphaned_result.scalar() or 0
+            health["orphaned_users"] = orphaned_result.scalar() or 0
 
             # Log health status
             await self._create_audit_log_entry(

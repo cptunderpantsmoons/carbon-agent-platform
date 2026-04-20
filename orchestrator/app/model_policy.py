@@ -1,6 +1,7 @@
 """Model policy API endpoints for routing and provider control."""
+
 import uuid
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -30,7 +31,9 @@ def _build_default_policy(tenant_id: str) -> ModelPolicy:
     )
 
 
-async def _get_or_create_policy(db: AsyncSession, tenant_id: str = "default") -> ModelPolicy:
+async def _get_or_create_policy(
+    db: AsyncSession, tenant_id: str = "default"
+) -> ModelPolicy:
     """Fetch existing policy or create a default one."""
     result = await db.execute(
         select(ModelPolicy)
@@ -60,7 +63,9 @@ async def _get_or_create_policy(db: AsyncSession, tenant_id: str = "default") ->
     return policy
 
 
-async def _get_policy_or_default(db: AsyncSession, tenant_id: str = "default") -> ModelPolicy:
+async def _get_policy_or_default(
+    db: AsyncSession, tenant_id: str = "default"
+) -> ModelPolicy:
     """Fetch the current policy without mutating the database."""
     result = await db.execute(
         select(ModelPolicy)

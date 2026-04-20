@@ -1,8 +1,8 @@
 """Orchestrator API - main FastAPI application."""
+
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
@@ -30,7 +30,6 @@ class DBSessionMiddleware(BaseHTTPMiddleware):
     """Middleware that provides a database session via request.state."""
 
     async def dispatch(self, request, call_next):
-        from app.database import get_session
         async for session in get_session():
             request.state.db = session
             try:
@@ -53,13 +52,13 @@ def _validate_production_config() -> None:
     missing = []
 
     required = {
-        "clerk_secret_key":        "CLERK_SECRET_KEY",
-        "clerk_publishable_key":   "CLERK_PUBLISHABLE_KEY",
-        "clerk_frontend_api_url":  "CLERK_FRONTEND_API_URL",
-        "clerk_webhook_secret":    "CLERK_WEBHOOK_SECRET",
-        "clerk_jwt_issuer":        "CLERK_JWT_ISSUER",
-        "database_url":            "DATABASE_URL",
-        "rag_fixed_tenant_id":      "RAG_FIXED_TENANT_ID",
+        "clerk_secret_key": "CLERK_SECRET_KEY",
+        "clerk_publishable_key": "CLERK_PUBLISHABLE_KEY",
+        "clerk_frontend_api_url": "CLERK_FRONTEND_API_URL",
+        "clerk_webhook_secret": "CLERK_WEBHOOK_SECRET",
+        "clerk_jwt_issuer": "CLERK_JWT_ISSUER",
+        "database_url": "DATABASE_URL",
+        "rag_fixed_tenant_id": "RAG_FIXED_TENANT_ID",
     }
     for attr, env_name in required.items():
         val = getattr(s, attr, "")

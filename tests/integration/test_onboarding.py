@@ -3,6 +3,7 @@
 Tests the full Clerk webhook → DB user → Docker container creation pipeline.
 Uses SQLite in-memory database and mocked Docker Engine API.
 """
+
 import base64
 import json
 import uuid
@@ -39,7 +40,9 @@ def _sign_payload(payload: bytes) -> dict:
     }
 
 
-def _make_user_created_payload(clerk_user_id: str, email: str = "new@example.com") -> bytes:
+def _make_user_created_payload(
+    clerk_user_id: str, email: str = "new@example.com"
+) -> bytes:
     payload = {
         "object": "event",
         "type": "user.created",
@@ -56,6 +59,7 @@ def _make_user_created_payload(clerk_user_id: str, email: str = "new@example.com
 
 
 # --- Database fixtures ---
+
 
 @pytest_asyncio.fixture
 async def db_engine():
@@ -76,6 +80,7 @@ async def db_session(db_engine):
 
 
 # --- App fixtures ---
+
 
 def _create_test_app(db_session: AsyncSession) -> FastAPI:
     from starlette.middleware.base import BaseHTTPMiddleware
@@ -102,13 +107,12 @@ def settings_mock():
 
 # --- Tests ---
 
+
 class TestUserOnboarding:
     """Integration tests for the Clerk webhook → provisioning flow."""
 
     @pytest.mark.asyncio
-    async def test_user_created_triggers_provisioning(
-        self, db_session, settings_mock
-    ):
+    async def test_user_created_triggers_provisioning(self, db_session, settings_mock):
         """Clerk webhook → DB user record → Docker container created.
 
         Validates VAL-PROV-001, VAL-PROV-002, VAL-PROV-004.
@@ -120,12 +124,22 @@ class TestUserOnboarding:
         # Mock Docker manager so we don't need real Docker access
         mock_docker_manager = MagicMock()
         mock_docker_manager.ensure_user_service = AsyncMock(
-            return_value={"action": "created", "container_id": "abc123", "was_created": True}
+            return_value={
+                "action": "created",
+                "container_id": "abc123",
+                "was_created": True,
+            }
         )
 
-        with patch("app.session_manager.DockerServiceManager", return_value=mock_docker_manager), \
-             patch("app.clerk.get_session_manager") as mock_get_sm:
+        with (
+            patch(
+                "app.session_manager.DockerServiceManager",
+                return_value=mock_docker_manager,
+            ),
+            patch("app.clerk.get_session_manager") as mock_get_sm,
+        ):
             from app.session_manager import SessionManager
+
             sm = SessionManager()
             sm.docker_manager = mock_docker_manager
             mock_get_sm.return_value = sm
@@ -162,9 +176,7 @@ class TestUserOnboarding:
         assert audit.action == "user.created"
 
     @pytest.mark.asyncio
-    async def test_duplicate_webhook_idempotent(
-        self, db_session, settings_mock
-    ):
+    async def test_duplicate_webhook_idempotent(self, db_session, settings_mock):
         """Same webhook delivered twice doesn't create duplicate resources."""
         clerk_user_id = f"user_{uuid.uuid4().hex[:8]}"
         body = _make_user_created_payload(clerk_user_id)
@@ -204,9 +216,7 @@ class TestUserOnboarding:
         assert len(users) == 1
 
     @pytest.mark.asyncio
-    async def test_webhook_signature_rejection(
-        self, db_session, settings_mock
-    ):
+    async def test_webhook_signature_rejection(self, db_session, settings_mock):
         """Invalid Svix signature returns 400, no DB writes."""
         clerk_user_id = f"user_{uuid.uuid4().hex[:8]}"
         body = _make_user_created_payload(clerk_user_id)
@@ -235,9 +245,7 @@ class TestUserOnboarding:
         assert result.scalar_one_or_none() is None
 
     @pytest.mark.asyncio
-    async def test_user_linked_to_existing_email(
-        self, db_session, settings_mock
-    ):
+    async def test_user_linked_to_existing_email(self, db_session, settings_mock):
         """Clerk webhook for an existing admin-created user links by email."""
         # Pre-create a user without clerk_user_id
         existing_user = User(
@@ -278,9 +286,7 @@ class TestUserOnboarding:
         assert existing_user.clerk_user_id == clerk_user_id
 
     @pytest.mark.asyncio
-    async def test_provision_user_background_creates_container(
-        self, db_session
-    ):
+    async def test_provision_user_background_creates_container(self, db_session):
         """provision_user_background() creates Docker container for a new user."""
         from app.session_manager import SessionManager
 
@@ -300,12 +306,19 @@ class TestUserOnboarding:
         # Mock Docker manager
         mock_docker_manager = MagicMock()
         mock_docker_manager.ensure_user_service = AsyncMock(
-            return_value={"action": "created", "container_id": "abc_bg", "was_created": True}
+            return_value={
+                "action": "created",
+                "container_id": "abc_bg",
+                "was_created": True,
+            }
         )
 
         sm = SessionManager()
         sm.docker_manager = mock_docker_manager
-        with patch("app.session_manager.create_session", return_value=db_session):
+        with (
+            patch("app.session_manager.provision_session", return_value=db_session),
+            patch.object(db_session, "close", new=AsyncMock()),
+        ):
             was_created = await sm.provision_user_background(user_id)
 
         assert was_created is True
@@ -315,9 +328,7 @@ class TestUserOnboarding:
         assert user.status == UserStatus.ACTIVE
 
     @pytest.mark.asyncio
-    async def test_provision_user_background_reraises_on_failure(
-        self, db_session
-    ):
+    async def test_provision_user_background_reraises_on_failure(self, db_session):
         """provision_user_background() re-raises so asyncio.create_task logs it."""
         from app.session_manager import SessionManager
 
@@ -341,6 +352,9 @@ class TestUserOnboarding:
 
         sm = SessionManager()
         sm.docker_manager = mock_docker_manager
-        with patch("app.session_manager.create_session", return_value=db_session):
+        with (
+            patch("app.session_manager.provision_session", return_value=db_session),
+            patch.object(db_session, "close", new=AsyncMock()),
+        ):
             with pytest.raises(RuntimeError, match="Docker API unavailable"):
                 await sm.provision_user_background(user_id)

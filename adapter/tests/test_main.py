@@ -1,4 +1,5 @@
 """Tests for the adapter FastAPI app."""
+
 from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
@@ -46,7 +47,9 @@ def test_chat_completions_preserves_openai_request_fields():
         finish_reason="stop",
     )
 
-    with patch("app.main.execute_agent_run", new=AsyncMock(return_value=mock_result)) as mock_run:
+    with patch(
+        "app.main.execute_agent_run", new=AsyncMock(return_value=mock_result)
+    ) as mock_run:
         response = client.post(
             "/v1/chat/completions",
             headers={"Authorization": "Bearer sk-test"},

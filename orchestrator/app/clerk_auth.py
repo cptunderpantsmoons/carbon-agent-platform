@@ -1,4 +1,5 @@
 """Clerk JWT authentication middleware."""
+
 import time
 from collections.abc import Mapping
 from typing import Any, TypedDict
@@ -86,7 +87,10 @@ async def _fetch_clerk_public_key(key_id: str | None = None) -> str:
         for jwk in jwks.get("keys", []):
             if key_id is None or jwk.get("kid") == key_id:
                 pem_key = _jwk_to_pem(jwk)
-                _clerk_public_keys[cache_key] = (pem_key, time.time() + _PUBLIC_KEY_CACHE_TTL)
+                _clerk_public_keys[cache_key] = (
+                    pem_key,
+                    time.time() + _PUBLIC_KEY_CACHE_TTL,
+                )
                 return pem_key
 
         detail = "Invalid token: unknown key ID" if key_id else "Invalid token"
@@ -97,7 +101,9 @@ async def _fetch_clerk_public_key(key_id: str | None = None) -> str:
         raise HTTPException(status_code=500, detail="Failed to fetch Clerk public key")
 
 
-def _resolve_test_jwks_key(jwks_override: Mapping[str, object], key_id: str | None) -> str:
+def _resolve_test_jwks_key(
+    jwks_override: Mapping[str, object], key_id: str | None
+) -> str:
     """Resolve a PEM key from a supplied JWKS payload (used in tests)."""
     keys = jwks_override.get("keys", [])
     if not isinstance(keys, list):
@@ -118,7 +124,9 @@ def _extract_bearer_token(authorization: str) -> str:
         raise HTTPException(status_code=401, detail="Missing Authorization header")
 
     if not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Invalid Authorization header format")
+        raise HTTPException(
+            status_code=401, detail="Invalid Authorization header format"
+        )
 
     return authorization[7:]
 
@@ -126,13 +134,17 @@ def _extract_bearer_token(authorization: str) -> str:
 def _validate_authorized_party(payload: dict[str, Any]) -> None:
     """Validate the Clerk ``azp`` claim against configured authorized origins."""
     settings = get_settings()
-    allowed_origins = [o.strip() for o in settings.clerk_authorized_origins.split(",") if o.strip()]
+    allowed_origins = [
+        o.strip() for o in settings.clerk_authorized_origins.split(",") if o.strip()
+    ]
     if not allowed_origins:
         return
 
     azp = payload.get("azp")
     if not isinstance(azp, str) or azp not in allowed_origins:
-        raise HTTPException(status_code=401, detail="Invalid token: authorized party mismatch")
+        raise HTTPException(
+            status_code=401, detail="Invalid token: authorized party mismatch"
+        )
 
 
 async def verify_clerk_token(

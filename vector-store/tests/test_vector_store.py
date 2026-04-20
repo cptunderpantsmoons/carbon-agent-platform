@@ -81,7 +81,9 @@ def test_normalize_where_filter_wraps_document_id_with_scope():
 
 
 def test_get_stats_uses_ids_only_for_filtered_scope():
-    collection = FakeCollection(get_result={"ids": ["chunk-1", "chunk-2", "chunk-3"]}, count_result=99)
+    collection = FakeCollection(
+        get_result={"ids": ["chunk-1", "chunk-2", "chunk-3"]}, count_result=99
+    )
     store = _make_store(collection)
 
     stats = store.get_stats(

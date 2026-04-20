@@ -3,6 +3,7 @@
 Tests idle spin-down, API key rotation, and user deletion propagation.
 Uses SQLite in-memory database and mocked Docker Engine API.
 """
+
 import base64
 import json
 import uuid
@@ -11,13 +12,12 @@ from unittest.mock import patch, AsyncMock, MagicMock
 
 import pytest
 import pytest_asyncio
-from fastapi import FastAPI, Depends
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from svix.webhooks import Webhook
 
-from app.models import User, UserStatus, AuditLog, Base
+from app.models import User, UserStatus, Base
 from app.clerk import clerk_webhook_router
 from app.users import user_router
 from app.database import get_session
@@ -47,7 +47,9 @@ def _make_user_deleted_payload(clerk_user_id: str) -> bytes:
         "type": "user.deleted",
         "data": {
             "id": clerk_user_id,
-            "email_addresses": [{"email_address": "deleted@example.com", "id": "idn_del"}],
+            "email_addresses": [
+                {"email_address": "deleted@example.com", "id": "idn_del"}
+            ],
             "first_name": "Deleted",
             "last_name": "User",
             "deleted": True,
@@ -59,6 +61,7 @@ def _make_user_deleted_payload(clerk_user_id: str) -> bytes:
 
 
 # --- Database fixtures ---
+
 
 @pytest_asyncio.fixture
 async def db_engine():
@@ -97,6 +100,7 @@ async def active_user(db_session):
 
 # --- App fixtures ---
 
+
 def _create_webhook_app(db_session: AsyncSession) -> FastAPI:
     from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -122,6 +126,7 @@ def settings_mock():
 
 # --- Tests ---
 
+
 class TestUserLifecycle:
     """Integration tests for idle spin-down, key rotation, deletion propagation."""
 
@@ -138,7 +143,10 @@ class TestUserLifecycle:
 
         sm = SessionManager()
         sm.docker_manager = mock_docker_manager
-        with patch("app.session_manager.create_session", return_value=db_session):
+        with (
+            patch("app.session_manager.provision_session", return_value=db_session),
+            patch.object(db_session, "close", new=AsyncMock()),
+        ):
             result = await sm.spin_down_idle_user(active_user.id)
 
         assert result is True
@@ -148,7 +156,9 @@ class TestUserLifecycle:
         assert active_user.status == UserStatus.PENDING
 
         # Verify Docker spin_down was called
-        mock_docker_manager.spin_down_user_service.assert_called_once_with(active_user.id)
+        mock_docker_manager.spin_down_user_service.assert_called_once_with(
+            active_user.id
+        )
 
     @pytest.mark.asyncio
     async def test_idle_user_no_service(self, db_session):
@@ -167,15 +177,16 @@ class TestUserLifecycle:
         await db_session.commit()
 
         sm = SessionManager()
-        with patch("app.session_manager.create_session", return_value=db_session):
+        with (
+            patch("app.session_manager.provision_session", return_value=db_session),
+            patch.object(db_session, "close", new=AsyncMock()),
+        ):
             result = await sm.spin_down_idle_user(user.id)
-
+        assert result is False
         assert result is False
 
     @pytest.mark.asyncio
-    async def test_api_key_rotation_invalidates_old(
-        self, db_session, active_user
-    ):
+    async def test_api_key_rotation_invalidates_old(self, db_session, active_user):
         """Rotate API key -> old key rejected, new key accepted.
 
         Validates VAL-CROSS-002.
@@ -236,6 +247,7 @@ class TestUserLifecycle:
 
         with patch("app.clerk.get_session_manager") as mock_get_sm:
             from app.session_manager import SessionManager
+
             sm = SessionManager()
             sm.docker_manager = mock_docker_manager
             mock_get_sm.return_value = sm
@@ -257,12 +269,12 @@ class TestUserLifecycle:
         assert active_user.status == UserStatus.SUSPENDED
 
         # Verify Docker spin_down was called
-        mock_docker_manager.spin_down_user_service.assert_called_once_with(active_user.id)
+        mock_docker_manager.spin_down_user_service.assert_called_once_with(
+            active_user.id
+        )
 
     @pytest.mark.asyncio
-    async def test_user_deleted_idempotent(
-        self, db_session, settings_mock
-    ):
+    async def test_user_deleted_idempotent(self, db_session, settings_mock):
         """Deleting an already-suspended user is idempotent."""
         user = User(
             id=str(uuid.uuid4()),
@@ -304,6 +316,7 @@ class TestUserLifecycle:
 
         with patch("app.clerk.get_session_manager") as mock_get_sm:
             from app.session_manager import SessionManager
+
             sm = SessionManager()
             sm.docker_manager = mock_docker_manager
             mock_get_sm.return_value = sm
@@ -319,8 +332,10 @@ class TestUserLifecycle:
 
         # Now try to use the user's API key
         user_app = FastAPI()
+
         async def _override_get_session():
             yield db_session
+
         user_app.dependency_overrides[get_session] = _override_get_session
         user_app.include_router(user_router)
 
@@ -332,9 +347,7 @@ class TestUserLifecycle:
         assert resp.status_code in (401, 403)
 
     @pytest.mark.asyncio
-    async def test_spin_down_on_container_failure(
-        self, db_session, active_user
-    ):
+    async def test_spin_down_on_container_failure(self, db_session, active_user):
         """If Docker stop fails, spin_down_user_service should still update DB status."""
         from app.session_manager import SessionManager
 
@@ -343,7 +356,10 @@ class TestUserLifecycle:
 
         sm = SessionManager()
         sm.docker_manager = mock_docker_manager
-        with patch("app.session_manager.create_session", return_value=db_session):
+        with (
+            patch("app.session_manager.provision_session", return_value=db_session),
+            patch.object(db_session, "close", new=AsyncMock()),
+        ):
             result = await sm.spin_down_idle_user(active_user.id)
 
         assert result is True

@@ -1,6 +1,6 @@
 """Tests for ORM models."""
+
 import pytest
-from datetime import datetime, timezone
 from sqlalchemy import select
 from app.models import User, Session, AuditLog, UserStatus, SessionStatus
 
@@ -81,7 +81,9 @@ async def test_session_default_status(db_session, sample_user_data):
 
 
 @pytest.mark.asyncio
-async def test_user_session_relationship(db_session, sample_user_data, sample_session_data):
+async def test_user_session_relationship(
+    db_session, sample_user_data, sample_session_data
+):
     user = User(**sample_user_data)
     db_session.add(user)
     await db_session.flush()
@@ -99,7 +101,9 @@ async def test_user_session_relationship(db_session, sample_user_data, sample_se
 
 
 @pytest.mark.asyncio
-async def test_session_user_back_populates(db_session, sample_user_data, sample_session_data):
+async def test_session_user_back_populates(
+    db_session, sample_user_data, sample_session_data
+):
     user = User(**sample_user_data)
     db_session.add(user)
     await db_session.flush()

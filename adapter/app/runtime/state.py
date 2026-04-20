@@ -4,6 +4,7 @@ Replaces Agent Zero's implicit context_id storage with a keyed,
 queryable conversation model persisted in Redis (with Postgres
 fallback for long-term archival).
 """
+
 import json
 import uuid
 from datetime import datetime, timezone
@@ -67,10 +68,14 @@ class ConversationStateStore:
             metadata=metadata or {},
         )
         await self._save(state)
-        logger.info("conversation_created", conversation_id=conversation_id, user_id=user_id)
+        logger.info(
+            "conversation_created", conversation_id=conversation_id, user_id=user_id
+        )
         return state
 
-    async def get(self, user_id: str, conversation_id: str) -> Optional[ConversationState]:
+    async def get(
+        self, user_id: str, conversation_id: str
+    ) -> Optional[ConversationState]:
         store = get_context_store()
         key = self._key(user_id, conversation_id)
         raw = await store.get(key)

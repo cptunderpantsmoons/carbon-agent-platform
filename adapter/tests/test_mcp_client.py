@@ -9,7 +9,6 @@ Tests cover:
 """
 
 import asyncio
-import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -79,7 +78,7 @@ class TestMCPClientHealthCheck:
         mock_client = AsyncMock()
         mock_client.get.return_value = mock_response
 
-        with patch.object(MCPClient, '_get_client', return_value=mock_client):
+        with patch.object(MCPClient, "_get_client", return_value=mock_client):
             client = MCPClient(enabled=True)
             result = await client.health_check()
 
@@ -92,7 +91,7 @@ class TestMCPClientHealthCheck:
         mock_client = AsyncMock()
         mock_client.get.side_effect = httpx.TimeoutException("Connection timed out")
 
-        with patch.object(MCPClient, '_get_client', return_value=mock_client):
+        with patch.object(MCPClient, "_get_client", return_value=mock_client):
             client = MCPClient(enabled=True)
             result = await client.health_check()
 
@@ -105,7 +104,7 @@ class TestMCPClientHealthCheck:
         mock_client = AsyncMock()
         mock_client.get.side_effect = httpx.ConnectError("Connection refused")
 
-        with patch.object(MCPClient, '_get_client', return_value=mock_client):
+        with patch.object(MCPClient, "_get_client", return_value=mock_client):
             client = MCPClient(enabled=True)
 
             with pytest.raises(MCPConnectionError) as exc_info:
@@ -125,7 +124,7 @@ class TestMCPClientHealthCheck:
         mock_client = AsyncMock()
         mock_client.get.return_value = mock_response
 
-        with patch.object(MCPClient, '_get_client', return_value=mock_client):
+        with patch.object(MCPClient, "_get_client", return_value=mock_client):
             client = MCPClient(enabled=True)
             result = await client.health_check()
 
@@ -152,13 +151,13 @@ class TestMCPToolDiscovery:
                 {
                     "name": "browser_search",
                     "description": "Search the web",
-                    "parameters": {"query": "string", "max_results": "integer"}
+                    "parameters": {"query": "string", "max_results": "integer"},
                 },
                 {
                     "name": "code_executor",
                     "description": "Execute Python code",
-                    "parameters": {"code": "string"}
-                }
+                    "parameters": {"code": "string"},
+                },
             ]
         }
         mock_response.raise_for_status = MagicMock()
@@ -166,7 +165,7 @@ class TestMCPToolDiscovery:
         mock_client = AsyncMock()
         mock_client.get.return_value = mock_response
 
-        with patch.object(MCPClient, '_get_client', return_value=mock_client):
+        with patch.object(MCPClient, "_get_client", return_value=mock_client):
             client = MCPClient(enabled=True)
             tools = await client.list_tools()
 
@@ -186,7 +185,7 @@ class TestMCPToolDiscovery:
         mock_client = AsyncMock()
         mock_client.get.return_value = mock_response
 
-        with patch.object(MCPClient, '_get_client', return_value=mock_client):
+        with patch.object(MCPClient, "_get_client", return_value=mock_client):
             client = MCPClient(enabled=True)
             tools = await client.list_tools()
 
@@ -198,7 +197,7 @@ class TestMCPToolDiscovery:
         mock_client = AsyncMock()
         mock_client.get.side_effect = httpx.TimeoutException("Request timed out")
 
-        with patch.object(MCPClient, '_get_client', return_value=mock_client):
+        with patch.object(MCPClient, "_get_client", return_value=mock_client):
             client = MCPClient(enabled=True, max_retries=1)
             tools = await client.list_tools()
 
@@ -211,7 +210,7 @@ class TestMCPToolDiscovery:
         mock_client = AsyncMock()
         mock_client.get.side_effect = httpx.HTTPError("Internal server error")
 
-        with patch.object(MCPClient, '_get_client', return_value=mock_client):
+        with patch.object(MCPClient, "_get_client", return_value=mock_client):
             client = MCPClient(enabled=True)
             tools = await client.list_tools()
 
@@ -227,6 +226,7 @@ class TestMCPToolDiscovery:
         mock_response.raise_for_status = MagicMock()
 
         call_count = 0
+
         async def mock_get(*args, **kwargs):
             nonlocal call_count
             call_count += 1
@@ -237,7 +237,7 @@ class TestMCPToolDiscovery:
         mock_client = AsyncMock()
         mock_client.get = mock_get
 
-        with patch.object(MCPClient, '_get_client', return_value=mock_client):
+        with patch.object(MCPClient, "_get_client", return_value=mock_client):
             client = MCPClient(enabled=True, max_retries=3)
             tools = await client.list_tools()
 
@@ -265,24 +265,24 @@ class TestMCPToolExecution:
         mock_response.json.return_value = {
             "success": True,
             "result": {"results": ["page1", "page2"]},
-            "tool_name": "browser_search"
+            "tool_name": "browser_search",
         }
         mock_response.raise_for_status = MagicMock()
 
         mock_client = AsyncMock()
         mock_client.post.return_value = mock_response
 
-        with patch.object(MCPClient, '_get_client', return_value=mock_client):
+        with patch.object(MCPClient, "_get_client", return_value=mock_client):
             client = MCPClient(enabled=True)
             result = await client.call_tool(
                 "browser_search",
                 {"query": "Python async programming"},
-                user_id="user-123"
+                user_id="user-123",
             )
 
             assert result["success"] is True
             assert "results" in result["result"]
-            
+
             # Verify correct endpoint was called
             mock_client.post.assert_called_once()
             call_args = mock_client.post.call_args
@@ -300,7 +300,7 @@ class TestMCPToolExecution:
         mock_client = AsyncMock()
         mock_client.post.return_value = mock_response
 
-        with patch.object(MCPClient, '_get_client', return_value=mock_client):
+        with patch.object(MCPClient, "_get_client", return_value=mock_client):
             client = MCPClient(enabled=True)
             await client.call_tool("search", {"query": "test"})
 
@@ -313,7 +313,7 @@ class TestMCPToolExecution:
         mock_client = AsyncMock()
         mock_client.post.side_effect = httpx.TimeoutException("Request timed out")
 
-        with patch.object(MCPClient, '_get_client', return_value=mock_client):
+        with patch.object(MCPClient, "_get_client", return_value=mock_client):
             client = MCPClient(enabled=True, timeout_seconds=30.0)
 
             with pytest.raises(MCPTimeoutError) as exc_info:
@@ -335,7 +335,7 @@ class TestMCPToolExecution:
         mock_client = AsyncMock()
         mock_client.post.return_value = mock_response
 
-        with patch.object(MCPClient, '_get_client', return_value=mock_client):
+        with patch.object(MCPClient, "_get_client", return_value=mock_client):
             client = MCPClient(enabled=True)
 
             with pytest.raises(MCPError) as exc_info:
@@ -349,7 +349,7 @@ class TestMCPToolExecution:
         mock_client = AsyncMock()
         mock_client.post.side_effect = httpx.ConnectError("Connection refused")
 
-        with patch.object(MCPClient, '_get_client', return_value=mock_client):
+        with patch.object(MCPClient, "_get_client", return_value=mock_client):
             client = MCPClient(enabled=True)
 
             with pytest.raises(MCPConnectionError) as exc_info:
@@ -400,12 +400,13 @@ class TestMCPClientLifecycle:
     async def test_reset_mcp_client(self):
         """reset_mcp_client clears singleton and closes connection."""
         mock_http_client = AsyncMock()
-        
+
         client = MCPClient()
         client._client = mock_http_client
 
         # Manually set the singleton
         import app.mcp_client as mcp_module
+
         mcp_module._mcp_client = client
 
         await reset_mcp_client()
@@ -422,7 +423,7 @@ class TestMCPToolSerialization:
         tool = MCPTool(
             name="search",
             description="Search the web",
-            parameters={"query": "string", "limit": "integer"}
+            parameters={"query": "string", "limit": "integer"},
         )
 
         assert tool.name == "search"
@@ -432,15 +433,13 @@ class TestMCPToolSerialization:
     def test_mcp_tool_to_dict(self):
         """MCPTool can be converted to dict."""
         tool = MCPTool(
-            name="code_exec",
-            description="Execute code",
-            parameters={"code": "string"}
+            name="code_exec", description="Execute code", parameters={"code": "string"}
         )
 
         tool_dict = {
             "name": tool.name,
             "description": tool.description,
-            "parameters": tool.parameters
+            "parameters": tool.parameters,
         }
 
         assert tool_dict["name"] == "code_exec"
@@ -451,16 +450,13 @@ class TestMCPToolSerialization:
         registry_response = {
             "name": "browser_navigate",
             "description": "Navigate to URL",
-            "parameters": {
-                "url": "string",
-                "timeout": "integer"
-            }
+            "parameters": {"url": "string", "timeout": "integer"},
         }
 
         tool = MCPTool(
             name=registry_response["name"],
             description=registry_response.get("description", ""),
-            parameters=registry_response.get("parameters", {})
+            parameters=registry_response.get("parameters", {}),
         )
 
         assert tool.name == "browser_navigate"
@@ -477,7 +473,7 @@ class TestMCPFallbackMechanisms:
         mock_client.get.side_effect = httpx.ConnectError("Gateway unreachable")
         mock_client.post.side_effect = httpx.ConnectError("Gateway unreachable")
 
-        with patch.object(MCPClient, '_get_client', return_value=mock_client):
+        with patch.object(MCPClient, "_get_client", return_value=mock_client):
             client = MCPClient(enabled=True)
 
             # list_tools should return empty list, not raise
@@ -494,7 +490,7 @@ class TestMCPFallbackMechanisms:
         mock_client = AsyncMock()
         mock_client.post.side_effect = httpx.TimeoutException("Timeout")
 
-        with patch.object(MCPClient, '_get_client', return_value=mock_client):
+        with patch.object(MCPClient, "_get_client", return_value=mock_client):
             client = MCPClient(enabled=True)
 
             # Simulate fallback pattern
@@ -515,13 +511,16 @@ class TestMCPFallbackMechanisms:
         mock_tools_response.json.return_value = {
             "tools": [
                 {"name": "search", "description": "Search", "parameters": {}},
-                {"name": "browser", "description": "Browser", "parameters": {}}
+                {"name": "browser", "description": "Browser", "parameters": {}},
             ]
         }
         mock_tools_response.raise_for_status = MagicMock()
 
         mock_call_response = MagicMock()
-        mock_call_response.json.return_value = {"success": False, "result": "Tool unavailable"}
+        mock_call_response.json.return_value = {
+            "success": False,
+            "result": "Tool unavailable",
+        }
         mock_call_response.raise_for_status.side_effect = httpx.HTTPStatusError(
             "503", request=MagicMock(), response=MagicMock(status_code=503)
         )
@@ -530,7 +529,7 @@ class TestMCPFallbackMechanisms:
         mock_client.get.return_value = mock_tools_response
         mock_client.post.return_value = mock_call_response
 
-        with patch.object(MCPClient, '_get_client', return_value=mock_client):
+        with patch.object(MCPClient, "_get_client", return_value=mock_client):
             client = MCPClient(enabled=True)
 
             # Tool list succeeds
@@ -552,7 +551,11 @@ class TestMCPIntegrationScenarios:
         tools_response = MagicMock()
         tools_response.json.return_value = {
             "tools": [
-                {"name": "web_search", "description": "Search web", "parameters": {"q": "string"}}
+                {
+                    "name": "web_search",
+                    "description": "Search web",
+                    "parameters": {"q": "string"},
+                }
             ]
         }
         tools_response.raise_for_status = MagicMock()
@@ -560,14 +563,13 @@ class TestMCPIntegrationScenarios:
         call_response = MagicMock()
         call_response.json.return_value = {
             "success": True,
-            "result": {"results": ["result1", "result2"]}
+            "result": {"results": ["result1", "result2"]},
         }
         call_response.raise_for_status = MagicMock()
 
-        call_count = 0
         async def mock_get(*args, **kwargs):
             return tools_response
-        
+
         async def mock_post(*args, **kwargs):
             return call_response
 
@@ -575,7 +577,7 @@ class TestMCPIntegrationScenarios:
         mock_client.get = mock_get
         mock_client.post = mock_post
 
-        with patch.object(MCPClient, '_get_client', return_value=mock_client):
+        with patch.object(MCPClient, "_get_client", return_value=mock_client):
             client = MCPClient(enabled=True)
 
             # Step 1: Discover tools
@@ -583,10 +585,7 @@ class TestMCPIntegrationScenarios:
             assert len(tools) == 1
 
             # Step 2: Call selected tool
-            result = await client.call_tool(
-                tools[0].name,
-                {"q": "Python asyncio"}
-            )
+            result = await client.call_tool(tools[0].name, {"q": "Python asyncio"})
             assert result["success"] is True
             assert len(result["result"]["results"]) == 2
 
@@ -600,7 +599,7 @@ class TestMCPIntegrationScenarios:
         mock_client = AsyncMock()
         mock_client.post.return_value = mock_response
 
-        with patch.object(MCPClient, '_get_client', return_value=mock_client):
+        with patch.object(MCPClient, "_get_client", return_value=mock_client):
             client = MCPClient(enabled=True)
 
             # Execute multiple tools concurrently

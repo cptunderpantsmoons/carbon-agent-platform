@@ -1,4 +1,5 @@
 """Admin API endpoints for managing users."""
+
 import uuid
 import secrets
 from fastapi import APIRouter, Depends, HTTPException, Header
@@ -8,11 +9,14 @@ from sqlalchemy import select, func
 from app.database import get_session
 from app.models import User, AuditLog, UserStatus
 from app.schemas import (
-    UserCreate, UserResponse, UserUpdate, UserWithApiKeyResponse,
-    AdminCommand, AdminResponse,
+    UserCreate,
+    UserResponse,
+    UserUpdate,
+    UserWithApiKeyResponse,
+    AdminCommand,
+    AdminResponse,
     PlatformHealth,
 )
-from app.config import get_settings
 from app.session_manager import get_session_manager
 from app.clerk_auth import verify_clerk_token, get_clerk_jwks_for_verification
 
@@ -48,7 +52,9 @@ async def verify_admin_jwt(
         raise HTTPException(status_code=401, detail="Missing Authorization header")
 
     if not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Invalid Authorization header format")
+        raise HTTPException(
+            status_code=401, detail="Invalid Authorization header format"
+        )
 
     token = authorization[7:]
 
@@ -60,7 +66,9 @@ async def verify_admin_jwt(
 
     # Check for admin role in Clerk public_metadata
     public_metadata = payload.get("public_metadata", {})
-    user_role = public_metadata.get("role") if isinstance(public_metadata, dict) else None
+    user_role = (
+        public_metadata.get("role") if isinstance(public_metadata, dict) else None
+    )
 
     if user_role != "admin":
         logger.warning(
@@ -218,7 +226,9 @@ async def delete_user(
             session_manager = get_session_manager()
             await session_manager.spin_down_user_service(db, user_id)
         except Exception as e:
-            logger.error("admin_delete_service_spindown_failed", user_id=user_id, error=str(e))
+            logger.error(
+                "admin_delete_service_spindown_failed", user_id=user_id, error=str(e)
+            )
             # Continue with deletion even if spindown fails; log the orphaned service
 
     log = AuditLog(
@@ -286,7 +296,9 @@ async def list_active_sessions(
 ):
     """List all users with active Docker containers."""
     result = await db.execute(
-        select(User).where(User.status == UserStatus.ACTIVE).order_by(User.updated_at.desc())
+        select(User)
+        .where(User.status == UserStatus.ACTIVE)
+        .order_by(User.updated_at.desc())
     )
     active_users = result.scalars().all()
 

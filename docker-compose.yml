@@ -166,7 +166,7 @@ services:
       AGENT_API_URL: ${AGENT_API_URL:-http://localhost:5000}
       AGENT_API_KEY: ${AGENT_API_KEY:-}
       MODEL_NAME: ${MODEL_NAME:-carbon-agent}
-      LLM_PROVIDER: ${LLM_PROVIDER:-agent-zero}
+      LLM_PROVIDER: ${LLM_PROVIDER:-openai}
       LLM_BASE_URL: ${LLM_BASE_URL:-http://localhost:5000}
       LLM_API_KEY: ${LLM_API_KEY:-}
       LLM_MODEL_NAME: ${LLM_MODEL_NAME:-carbon-agent}

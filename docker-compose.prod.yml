@@ -131,15 +131,15 @@ services:
     environment:
       # Database
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-carbon_platform}
-      # Agent Zero
-      AGENT_API_URL: ${AGENT_API_URL:?error - set AGENT_API_URL}
-      AGENT_API_KEY: ${AGENT_API_KEY:?error - set AGENT_API_KEY}
+      # Agent Runtime (pydantic-ai + OpenAI SDK)
+      AGENT_API_URL: ${AGENT_API_URL:-http://adapter:8000}
+      AGENT_API_KEY: ${AGENT_API_KEY:-}
       # LLM
       MODEL_NAME: ${MODEL_NAME:-carbon-agent}
-      LLM_PROVIDER: ${LLM_PROVIDER:-agent-zero}
-      LLM_BASE_URL: ${LLM_BASE_URL:-http://localhost:5000}
+      LLM_PROVIDER: ${LLM_PROVIDER:-openai}
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://api.openai.com/v1}
       LLM_API_KEY: ${LLM_API_KEY:-}
-      LLM_MODEL_NAME: ${LLM_MODEL_NAME:-carbon-agent}
+      LLM_MODEL_NAME: ${LLM_MODEL_NAME:-gpt-4.1}
       # Traefik routing
       AGENT_DOMAIN: ${AGENT_DOMAIN:?error - set AGENT_DOMAIN}
       # Context store

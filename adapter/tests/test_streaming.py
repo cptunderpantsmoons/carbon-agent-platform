@@ -1,4 +1,5 @@
 """Tests for SSE streaming formatter."""
+
 import asyncio
 import json
 from app.streaming import create_chunk, fake_stream_response

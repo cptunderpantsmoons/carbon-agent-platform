@@ -1,4 +1,5 @@
 """User-facing API endpoints for account and session management."""
+
 import uuid
 import secrets
 from fastapi import APIRouter, Depends, HTTPException, Header, Request
@@ -39,7 +40,9 @@ async def verify_user_api_key(
         raise HTTPException(status_code=401, detail="Missing Authorization header")
 
     if not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Invalid Authorization header format")
+        raise HTTPException(
+            status_code=401, detail="Invalid Authorization header format"
+        )
 
     api_key = authorization[7:]  # Remove "Bearer " prefix
 
@@ -138,7 +141,7 @@ async def ensure_my_service(
     """Ensure user has an active Docker container (spin up if needed)."""
     session_manager = get_session_manager()
     was_created, _ = await session_manager.ensure_user_service(db, user.id)
-    await db.commit()
+    # db.commit() is called internally by ensure_user_service; no second commit needed
 
     if was_created:
         return {"status": "created", "message": "Service spun up successfully"}
@@ -155,7 +158,7 @@ async def spin_down_my_service(
     """Spin down user's Docker container."""
     session_manager = get_session_manager()
     result = await session_manager.spin_down_user_service(db, user.id)
-    await db.commit()
+    # db.commit() is called internally by spin_down_user_service; no second commit needed
 
     if result:
         return {"status": "spun_down", "message": "Service spun down successfully"}

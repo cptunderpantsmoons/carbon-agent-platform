@@ -1,5 +1,6 @@
 """Authentication middleware and utilities for adapter."""
-from fastapi import HTTPException, Depends, Header
+
+from fastapi import HTTPException, Header
 from typing import Optional
 from datetime import datetime, timezone
 import structlog
@@ -7,14 +8,16 @@ from app.models import User, UserStatus
 
 logger = structlog.get_logger()
 
+
 async def get_db():
     """Get database session for dependency injection."""
     # Return a dummy async generator that yields None
     yield None
 
+
 async def verify_api_key(
     authorization: Optional[str] = Header(None),
-    db = None,
+    db=None,
 ) -> User:
     """Verify API key and return authenticated user.
 
@@ -33,7 +36,9 @@ async def verify_api_key(
 
     # Extract token from "Bearer {token}" format
     if not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Invalid Authorization header format")
+        raise HTTPException(
+            status_code=401, detail="Invalid Authorization header format"
+        )
 
     api_key = authorization[7:]  # Remove "Bearer " prefix
 

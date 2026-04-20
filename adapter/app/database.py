@@ -1,4 +1,5 @@
 """Database configuration for adapter (shared with orchestrator)."""
+
 import sys
 import os
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker

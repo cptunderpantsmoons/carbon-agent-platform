@@ -1,4 +1,5 @@
 """Tests for user-facing API endpoints."""
+
 import re
 import uuid
 from unittest.mock import AsyncMock, patch
@@ -206,7 +207,15 @@ async def test_user_api_key_rotation(users_client, db_session, test_user):
     )
     assert new_key_response.status_code == 200
 
-    logs = (await db_session.execute(select(AuditLog).where(AuditLog.user_id == test_user.id))).scalars().all()
+    logs = (
+        (
+            await db_session.execute(
+                select(AuditLog).where(AuditLog.user_id == test_user.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
     assert any(log.action == "user.api_key_rotated" for log in logs)
 
 

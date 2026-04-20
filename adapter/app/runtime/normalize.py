@@ -3,12 +3,13 @@
 Regardless of whether the underlying provider is OpenAI, Featherless,
 DeepSeek, or Anthropic, the dashboard receives one predictable payload.
 """
+
 from typing import Any
 import structlog
 
-from pydantic_ai import Agent, AgentRunResult
+from pydantic_ai import AgentRunResult
 
-from .responses import AgentExecutionResult, ToolCallResult, TokenUsage, Citation
+from .responses import AgentExecutionResult, ToolCallResult, TokenUsage
 
 logger = structlog.get_logger()
 
@@ -57,7 +58,9 @@ def normalize_response(
                             ToolCallResult(
                                 tool_name=part.tool_name,
                                 tool_call_id=part.tool_call_id,
-                                arguments=part.args_as_dict() if hasattr(part, "args_as_dict") else {},
+                                arguments=part.args_as_dict()
+                                if hasattr(part, "args_as_dict")
+                                else {},
                                 output="",
                             )
                         )
