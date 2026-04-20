@@ -27,7 +27,7 @@ def app_with_policy():
     """Create app with model policy routers but without lifespan."""
     from fastapi import FastAPI
     from fastapi.middleware.cors import CORSMiddleware
-    from app.model_policy import model_policy_router, public_policy_router
+    from app.model_policy import model_policy_router, internal_policy_router
 
     app = FastAPI(title="Test Policy API")
     app.add_middleware(
@@ -38,7 +38,7 @@ def app_with_policy():
         allow_headers=["*"],
     )
     app.include_router(model_policy_router)
-    app.include_router(public_policy_router)
+    app.include_router(internal_policy_router)
     return app
 
 
@@ -97,7 +97,10 @@ def test_public_policy_endpoint(app_with_policy):
     """Test that /v1/model-policy/me returns a default policy via endpoint."""
     client = TestClient(app_with_policy, raise_server_exceptions=False)
 
-    with patch("app.model_policy._get_policy_or_default") as mock_get:
+    with patch("app.model_policy.get_settings") as mock_settings, patch(
+        "app.model_policy._get_policy_or_default"
+    ) as mock_get:
+        mock_settings.return_value = MagicMock(admin_agent_api_key="test-admin-key")
         mock_policy = MagicMock()
         mock_policy.id = "policy-001"
         mock_policy.tenant_id = "default"
@@ -109,12 +112,26 @@ def test_public_policy_endpoint(app_with_policy):
         mock_policy.updated_at = datetime.now(timezone.utc)
         mock_get.return_value = mock_policy
 
-        response = client.get("/v1/model-policy/me")
+        response = client.get(
+            "/v1/model-policy/me",
+            headers={"X-Admin-Key": "test-admin-key"},
+        )
         assert response.status_code == 200
         data = response.json()
         assert data["routing_mode"] == "auto"
         assert data["default_provider"] == "featherless"
         assert data["benchmark_mode"] is True
+
+
+def test_internal_policy_requires_admin_key(app_with_policy):
+    """Test that the internal policy endpoint rejects anonymous requests."""
+    client = TestClient(app_with_policy, raise_server_exceptions=False)
+
+    with patch("app.model_policy.get_settings") as mock_settings:
+        mock_settings.return_value = MagicMock(admin_agent_api_key="test-admin-key")
+        response = client.get("/v1/model-policy/me")
+
+    assert response.status_code == 401
 
 
 def test_admin_policy_requires_auth(app_with_policy):

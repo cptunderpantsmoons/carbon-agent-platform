@@ -1,7 +1,7 @@
 """Model policy API endpoints for routing and provider control."""
 
 import uuid
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -11,12 +11,30 @@ from app.models import ModelPolicy
 from app.schemas import ModelPolicySchema, ModelPolicyUpdate
 from app.admin import verify_admin_jwt
 from app.models import User
+from app.config import get_settings
 
 import structlog
 
 logger = structlog.get_logger()
 model_policy_router = APIRouter(prefix="/admin", tags=["model-policy"])
-public_policy_router = APIRouter(prefix="/v1", tags=["model-policy"])
+internal_policy_router = APIRouter(prefix="/v1", tags=["model-policy"])
+
+
+def verify_internal_admin_key(
+    x_admin_key: str = Header(default="", alias="X-Admin-Key"),
+) -> None:
+    """Verify the internal admin key used by automation clients."""
+    settings = get_settings()
+    expected_key = settings.admin_agent_api_key.strip()
+
+    if not expected_key:
+        raise HTTPException(
+            status_code=503,
+            detail="Admin API key is not configured on the orchestrator",
+        )
+
+    if not x_admin_key or x_admin_key != expected_key:
+        raise HTTPException(status_code=401, detail="Invalid admin key")
 
 
 def _build_default_policy(tenant_id: str) -> ModelPolicy:
@@ -113,9 +131,10 @@ async def update_model_policy(
     return policy
 
 
-@public_policy_router.get("/model-policy/me", response_model=ModelPolicySchema)
+@internal_policy_router.get("/model-policy/me", response_model=ModelPolicySchema)
 async def get_my_model_policy(
     db: AsyncSession = Depends(get_session),
+    _: None = Depends(verify_internal_admin_key),
 ) -> ModelPolicy:
     """Read the model policy for runtime clients without creating rows."""
     policy = await _get_policy_or_default(db)

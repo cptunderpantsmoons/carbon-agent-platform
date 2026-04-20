@@ -134,6 +134,7 @@ services:
       # Agent Runtime (pydantic-ai + OpenAI SDK)
       AGENT_API_URL: ${AGENT_API_URL:-http://adapter:8000}
       AGENT_API_KEY: ${AGENT_API_KEY:-}
+      ADMIN_AGENT_API_KEY: ${ADMIN_AGENT_API_KEY:?error - set ADMIN_AGENT_API_KEY}
       # LLM
       MODEL_NAME: ${MODEL_NAME:-carbon-agent}
       LLM_PROVIDER: ${LLM_PROVIDER:-openai}

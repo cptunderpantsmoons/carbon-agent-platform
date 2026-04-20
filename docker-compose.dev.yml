@@ -112,6 +112,7 @@ services:
       # Agent Zero
       AGENT_API_URL: http://localhost:5000
       AGENT_API_KEY: ${AGENT_API_KEY:-}
+      ADMIN_AGENT_API_KEY: ${ADMIN_AGENT_API_KEY:-}
       # LLM
       MODEL_NAME: ${MODEL_NAME:-carbon-agent}
       # Traefik routing

@@ -33,11 +33,17 @@ class PolicyClient:
 
         Falls back to a permissive default if the orchestrator is unreachable.
         """
+        settings = get_settings()
+        headers = {}
+        if settings.admin_agent_api_key:
+            headers["X-Admin-Key"] = settings.admin_agent_api_key
+
         try:
             client = self._get_client()
             response = await client.get(
                 f"{self._base_url}/v1/model-policy/me",
                 params={"tenant_id": tenant_id},
+                headers=headers,
             )
             response.raise_for_status()
             data = response.json()

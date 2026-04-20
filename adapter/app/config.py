@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     llm_base_url: str = ""
     llm_api_key: str = ""
     llm_model_name: str = "gpt-4o"
+    admin_agent_api_key: str = ""
 
     # Orchestrator URL for model policy fetching
     orchestrator_url: str = "http://orchestrator:8000"

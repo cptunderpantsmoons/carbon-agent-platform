@@ -165,6 +165,7 @@ services:
       DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/carbon_platform}
       AGENT_API_URL: ${AGENT_API_URL:-http://localhost:5000}
       AGENT_API_KEY: ${AGENT_API_KEY:-}
+      ADMIN_AGENT_API_KEY: ${ADMIN_AGENT_API_KEY:-}
       MODEL_NAME: ${MODEL_NAME:-carbon-agent}
       LLM_PROVIDER: ${LLM_PROVIDER:-openai}
       LLM_BASE_URL: ${LLM_BASE_URL:-http://localhost:5000}
