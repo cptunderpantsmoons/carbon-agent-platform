@@ -154,13 +154,14 @@ app.add_middleware(DBSessionMiddleware)
 # API key injection for adapter-bound requests
 app.add_middleware(ApiKeyInjectionMiddleware)
 
-# Clerk identity propagation for RAG rate limiting must happen before SlowAPI.
-app.add_middleware(ClerkRAGIdentityMiddleware)
-
 # Rate limiting
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
 app.add_middleware(SlowAPIMiddleware)
+
+# Clerk identity propagation for RAG rate limiting must wrap SlowAPI so
+# request.state.user_id is populated before SlowAPI computes the limit key.
+app.add_middleware(ClerkRAGIdentityMiddleware)
 
 # Routers
 app.include_router(admin_router)

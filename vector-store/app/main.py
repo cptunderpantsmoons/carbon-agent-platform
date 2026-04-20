@@ -32,6 +32,14 @@ class SearchRequest(BaseModel):
     where_filter: Optional[Dict] = None
 
 
+class ScopedStatsRequest(BaseModel):
+    where_filter: Optional[Dict] = None
+
+
+class DeleteRequest(BaseModel):
+    where_filter: Dict
+
+
 @app.get("/health")
 async def health():
     return {"status": "healthy", "service": "vector-store"}
@@ -41,6 +49,16 @@ async def health():
 async def stats():
     """Get vector store statistics."""
     return store.get_stats()
+
+
+@app.post("/stats")
+async def scoped_stats(request: ScopedStatsRequest):
+    """Get scoped vector store statistics."""
+    try:
+        return store.get_stats(where_filter=request.where_filter)
+    except Exception as e:
+        logger.error("scoped_stats_error", error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/add")
@@ -73,6 +91,19 @@ async def search(request: SearchRequest):
         return results
     except Exception as e:
         logger.error("search_error", error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/delete")
+async def delete_documents(request: DeleteRequest):
+    """Delete only documents matching the provided metadata filter."""
+    try:
+        deleted = store.delete_documents(where_filter=request.where_filter)
+        return {"deleted": deleted}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error("delete_documents_error", error=str(e))
         raise HTTPException(status_code=500, detail=str(e))
 
 

@@ -14,9 +14,10 @@ from app.agent_client import AgentClient
 from app.streaming import fake_stream_response
 from app.config import get_settings
 from app.auth import verify_api_key, get_db
-from app.models import User
+from app.models import User, UserStatus
 from app.metrics import RequestIDMiddleware, metrics_endpoint
 from app.mcp_client import get_mcp_client, MCPError, MCPClient
+from app.llm_provider import create_provider, LLMProvider
 
 logger = structlog.get_logger()
 app = FastAPI(title="Carbon Agent OpenAI Adapter", version="2.0.0")
@@ -231,15 +232,17 @@ app.add_api_route("/metrics", metrics_endpoint, methods=["GET"])
 
 @app.get("/v1/models")
 async def list_models(user: User = Depends(verify_api_key)):
-    """List available models (returns carbon-agent for authenticated users)."""
+    """List available models (returns current LLM provider model)."""
+    settings = get_settings()
+    
     return {
         "object": "list",
         "data": [
             {
-                "id": "carbon-agent",
+                "id": settings.llm_model_name,
                 "object": "model",
                 "created": 1700000000,
-                "owned_by": "carbon-agent",
+                "owned_by": settings.llm_provider,
             }
         ],
     }
@@ -252,11 +255,11 @@ async def chat_completions(
 ):
     """OpenAI-compatible chat completions endpoint.
 
-    Routes requests to user's specific Docker container and
-    fakes SSE streaming if client requested it.
+    Routes requests to the configured LLM provider (Agent Zero, OpenAI,
+    Featherless AI, or Anthropic) and fakes SSE streaming if client requested it.
 
     If MCP is enabled, attempts to enhance the message with tool results
-    before sending to Agent Zero.
+    before sending to the LLM provider.
     """
     settings = get_settings()
 
@@ -270,7 +273,31 @@ async def chat_completions(
     if not user_message:
         raise HTTPException(status_code=400, detail="No user message found")
 
-    logger.info("chat_request", user_id=user.id, user_email=user.email, stream=request.stream)
+    logger.info(
+        "chat_request",
+        user_id=user.id,
+        user_email=user.email,
+        stream=request.stream,
+        llm_provider=settings.llm_provider,
+    )
+
+    # Automatically detect optimal temperature based on task type
+    temperature = detect_and_apply_temperature(
+        messages=[msg.model_dump() for msg in request.messages],
+        current_temperature=request.temperature if hasattr(request, 'temperature') else None,
+        provider=settings.llm_provider,
+    )
+
+    # Detect task type for logging
+    task_type = detect_task_type(user_message)
+    task_description = get_task_description(task_type)
+
+    logger.info(
+        "task_detection",
+        user_id=user.id,
+        detected_task=task_description,
+        auto_temperature=temperature,
+    )
 
     # MCP tool enhancement (optional, fails gracefully)
     if settings.mcp_enabled:
@@ -280,19 +307,42 @@ async def chat_completions(
             logger.error("mcp_enhancement_failed", user_id=user.id, error=str(e))
             # Continue without MCP enhancement
 
-    # Route to user's dedicated Docker container or fallback to shared endpoint
-    base_url = _get_agent_base_url(user, settings)
-    client = AgentClient(
-        base_url=base_url,
-        api_key=user.api_key,
-    )
-
-    # Always call agent non-streaming
-    try:
-        response_text = await client.send_message(user_message, user_id=user.id)
-    except Exception as e:
-        logger.error("agent_error", user_id=user.id, error=str(e))
-        raise HTTPException(status_code=502, detail=f"Agent error: {str(e)}")
+    # Route to appropriate LLM provider
+    if settings.llm_provider == "agent-zero":
+        # Use Agent Zero with per-user container routing
+        base_url = _get_agent_base_url(user, settings)
+        client = AgentClient(
+            base_url=base_url,
+            api_key=user.api_key,
+        )
+        
+        try:
+            response_text = await client.send_message(user_message, user_id=user.id)
+        except Exception as e:
+            logger.error("agent_error", user_id=user.id, error=str(e))
+            raise HTTPException(status_code=502, detail=f"Agent error: {str(e)}")
+    else:
+        # Use cloud LLM provider (OpenAI, Featherless, Anthropic)
+        llm = create_provider()
+        
+        try:
+            response_text = await llm.chat_completion(
+                messages=[msg.model_dump() for msg in request.messages],
+                temperature=request.temperature if hasattr(request, 'temperature') else 0.7,
+                max_tokens=request.max_tokens if hasattr(request, 'max_tokens') else None,
+                stream=request.stream,
+            )
+        except Exception as e:
+            logger.error(
+                "llm_provider_error",
+                user_id=user.id,
+                provider=settings.llm_provider,
+                error=str(e),
+            )
+            raise HTTPException(
+                status_code=502,
+                detail=f"LLM provider error ({settings.llm_provider}): {str(e)}"
+            )
 
     if request.stream:
         # Fake-stream the complete response as SSE word chunks
@@ -308,11 +358,26 @@ async def chat_completions(
 
     # Non-streaming response
     return ChatCompletionResponse(
-        model=settings.model_name,
+        model=settings.llm_model_name,
         choices=[
             ChatCompletionChoice(
                 message=ChatMessage(role="assistant", content=response_text)
             )
+        ],
+    )
+
+
+@app.get("/v1/user")
+async def get_user_info(user: User = Depends(verify_api_key)):
+    """Get current authenticated user information."""
+    return {
+        "id": user.id,
+        "email": user.email,
+        "display_name": user.display_name,
+        "status": user.status,
+        "has_service": user.status == UserStatus.ACTIVE,
+    }
+    }
         ],
     )
 

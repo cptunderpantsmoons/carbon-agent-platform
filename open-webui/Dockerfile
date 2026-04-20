@@ -32,16 +32,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends gettext-base \
 RUN groupadd -r webui && useradd -r -g webui -u 1000 -d /app -s /sbin/nologin webui
 
 # Ensure required directories exist
-RUN mkdir -p /app/static /app/backend/data
+RUN mkdir -p /app/build/static /app/static /app/backend/data
 
 # ── Copy custom assets ─────────────────────────────────────────────────────────
+COPY clerk-integration.js /app/build/static/clerk-integration.js
 COPY clerk-integration.js /app/static/clerk-integration.js
 COPY config.json.template /app/backend/data/config.json.template
 COPY custom-theme.css     /app/static/custom-theme.css
 COPY entrypoint.sh        /app/entrypoint.sh
 
 RUN chmod +x /app/entrypoint.sh \
-    && chmod 644 /app/static/clerk-integration.js \
+    && chmod 644 /app/build/static/clerk-integration.js \
+                 /app/static/clerk-integration.js \
                  /app/static/custom-theme.css \
                  /app/backend/data/config.json.template
 
@@ -62,7 +64,8 @@ RUN if [ -f /app/build/index.html ]; then \
 # the Open WebUI Python backend.  Grant webui write access only to the dirs it
 # must modify at runtime (config substitution, static uploads).
 RUN chmod -R a+rX /app \
-    && chown -R webui:webui /app/static \
+    && chown -R webui:webui /app/build/static \
+                            /app/static \
                             /app/backend/data \
                             /app/entrypoint.sh
 

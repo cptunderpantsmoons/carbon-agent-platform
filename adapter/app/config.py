@@ -4,7 +4,14 @@ from functools import lru_cache
 
 
 class Settings(BaseSettings):
-    # Agent Zero internal API
+    # LLM Provider Configuration
+    # Supported providers: agent-zero (default), openai, featherless, deepseek, anthropic
+    llm_provider: str = "agent-zero"
+    llm_base_url: str = "http://localhost:5000"
+    llm_api_key: str = ""
+    llm_model_name: str = "carbon-agent"  # Model name (varies by provider)
+
+    # Agent Zero internal API (legacy, kept for backward compatibility)
     agent_api_url: str = "http://localhost:5000"
     agent_api_key: str = ""
 
@@ -26,7 +33,7 @@ class Settings(BaseSettings):
     port: int = 8000
     host: str = "0.0.0.0"
 
-    # LLM info for OpenAI-compatible metadata
+    # LLM info for OpenAI-compatible metadata (display only)
     model_name: str = "carbon-agent"
 
     # MCP (Model Context Protocol) — obot integration

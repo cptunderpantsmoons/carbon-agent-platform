@@ -2,15 +2,31 @@ FROM python:3.12-slim@sha256:804ddf3251a60bbf9c92e73b7566c40428d54d0e79d3428194e
 
 WORKDIR /app
 
-# Install system dependencies (curl for health check, tini for signal handling)
+# Install system dependencies
+# curl/tini for health-check and signal handling;
+# gcc/g++/cmake needed to compile chroma-hnswlib
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     tini \
+    gcc \
+    g++ \
+    cmake \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first for better layer caching
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+
+# Pre-download the fastembed model so the first request is instant.
+# Model is stored in /app/.cache/fastembed (~90 MB for bge-small-en-v1.5)
+ENV FASTEMBED_CACHE_PATH=/app/.cache/fastembed
+RUN python -c \
+    "from fastembed import TextEmbedding; \
+     import os; \
+     os.environ['FASTEMBED_CACHE_PATH']='/app/.cache/fastembed'; \
+     m = TextEmbedding('BAAI/bge-small-en-v1.5'); \
+     _ = list(m.embed(['warmup'])); \
+     print('Model cached OK')"
 
 # Copy application code
 COPY app/ ./app/

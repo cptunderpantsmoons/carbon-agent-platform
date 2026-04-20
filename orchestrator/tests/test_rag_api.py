@@ -86,6 +86,7 @@ def _build_mock_vector_store_client(
     *,
     response_json: dict | None = None,
     error: Exception | None = None,
+    status_code: int = 200,
 ) -> httpx.AsyncClient:
     def handler(request: httpx.Request) -> httpx.Response:
         captured_requests.append(
@@ -97,7 +98,10 @@ def _build_mock_vector_store_client(
         )
         if error is not None:
             raise error
-        return httpx.Response(200, json=response_json or {"query": "", "results": [], "total_found": 0})
+        return httpx.Response(
+            status_code,
+            json=response_json or {"query": "", "results": [], "total_found": 0},
+        )
 
     return AsyncClient(
         transport=httpx.MockTransport(handler),
@@ -217,6 +221,93 @@ async def test_rag_query_returns_scoped_payload_result_shape(rag_client, signing
 
 
 @pytest.mark.asyncio
+async def test_rag_delete_proxies_scoped_document_delete(rag_client, signing_material):
+    private_key, _ = signing_material
+    token = _make_clerk_token(private_key, "clerk-user-delete-001")
+    captured_requests: list[dict] = []
+    mock_client = _build_mock_vector_store_client(
+        captured_requests,
+        response_json={"deleted": 1},
+    )
+
+    def fake_client_ctor(*args, **kwargs):
+        return mock_client
+
+    with patch("app.rag.httpx.AsyncClient", side_effect=fake_client_ctor):
+        response = await rag_client.delete(
+            "/api/v1/rag/documents/doc-delete-001",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    assert response.status_code == 200
+    assert len(captured_requests) == 1
+    assert captured_requests[0]["method"] == "POST"
+    assert captured_requests[0]["url"] == "http://vector-store.internal:8000/delete"
+    assert captured_requests[0]["json"] == {
+        "where_filter": {
+            "tenant_id": "tenant-fixed-001",
+            "clerk_user_id": "clerk-user-delete-001",
+            "document_id": "doc-delete-001",
+        },
+    }
+    assert response.json() == {
+        "scope": {
+            "tenant_id": "tenant-fixed-001",
+            "clerk_user_id": "clerk-user-delete-001",
+        },
+        "payload": {"document_id": "doc-delete-001"},
+        "result": {"deleted": 1},
+    }
+
+
+@pytest.mark.asyncio
+async def test_rag_stats_proxies_scoped_stats_request(rag_client, signing_material):
+    private_key, _ = signing_material
+    token = _make_clerk_token(private_key, "clerk-user-stats-001")
+    captured_requests: list[dict] = []
+    mock_client = _build_mock_vector_store_client(
+        captured_requests,
+        response_json={
+            "total_documents": 3,
+            "collection_name": "carbon-agent-documents",
+            "embedding_model": "all-MiniLM-L6-v2",
+        },
+    )
+
+    def fake_client_ctor(*args, **kwargs):
+        return mock_client
+
+    with patch("app.rag.httpx.AsyncClient", side_effect=fake_client_ctor):
+        response = await rag_client.get(
+            "/api/v1/rag/stats",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    assert response.status_code == 200
+    assert len(captured_requests) == 1
+    assert captured_requests[0]["method"] == "POST"
+    assert captured_requests[0]["url"] == "http://vector-store.internal:8000/stats"
+    assert captured_requests[0]["json"] == {
+        "where_filter": {
+            "tenant_id": "tenant-fixed-001",
+            "clerk_user_id": "clerk-user-stats-001",
+        },
+    }
+    assert response.json() == {
+        "scope": {
+            "tenant_id": "tenant-fixed-001",
+            "clerk_user_id": "clerk-user-stats-001",
+        },
+        "payload": {},
+        "result": {
+            "total_documents": 3,
+            "collection_name": "carbon-agent-documents",
+            "embedding_model": "all-MiniLM-L6-v2",
+        },
+    }
+
+
+@pytest.mark.asyncio
 async def test_rag_query_denies_suspended_carbon_user_row_with_matching_clerk_id(
     rag_client,
     db_session,
@@ -267,6 +358,54 @@ async def test_rag_query_returns_503_when_vector_store_unavailable(rag_client, s
 
     assert response.status_code == 503
     assert response.json()["detail"] == "Vector store service unavailable"
+    assert len(captured_requests) == 1
+
+
+@pytest.mark.asyncio
+async def test_rag_delete_returns_503_when_vector_store_unavailable(rag_client, signing_material):
+    private_key, _ = signing_material
+    token = _make_clerk_token(private_key, "clerk-user-delete-unavailable")
+    captured_requests: list[dict] = []
+    request = httpx.Request("POST", "http://vector-store.internal:8000/delete")
+    error = httpx.ConnectError("vector store unavailable", request=request)
+    mock_client = _build_mock_vector_store_client(captured_requests, error=error)
+
+    def fake_client_ctor(*args, **kwargs):
+        return mock_client
+
+    with patch("app.rag.httpx.AsyncClient", side_effect=fake_client_ctor):
+        response = await rag_client.delete(
+            "/api/v1/rag/documents/doc-delete-503",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Vector store service unavailable"
+    assert len(captured_requests) == 1
+
+
+@pytest.mark.asyncio
+async def test_rag_stats_returns_502_when_vector_store_errors(rag_client, signing_material):
+    private_key, _ = signing_material
+    token = _make_clerk_token(private_key, "clerk-user-stats-error")
+    captured_requests: list[dict] = []
+    mock_client = _build_mock_vector_store_client(
+        captured_requests,
+        response_json={"detail": "boom"},
+        status_code=500,
+    )
+
+    def fake_client_ctor(*args, **kwargs):
+        return mock_client
+
+    with patch("app.rag.httpx.AsyncClient", side_effect=fake_client_ctor):
+        response = await rag_client.get(
+            "/api/v1/rag/stats",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    assert response.status_code == 502
+    assert response.json()["detail"] == "Vector store stats failed with status 500"
     assert len(captured_requests) == 1
 
 

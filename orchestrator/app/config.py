@@ -67,7 +67,9 @@ class Settings(BaseSettings):
     # Set to False in production to rely on Alembic migrations instead of auto-create.
     auto_create_tables: bool = True
 
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+    # Docker Compose and local dev commonly share a repo-root .env across services.
+    # Ignore unrelated keys so orchestrator startup only cares about settings it owns.
+    model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
 
 @lru_cache

@@ -1,5 +1,7 @@
 services:
 
+  # ── Infrastructure ────────────────────────────────────────────────────────
+
   postgres:
     image: postgres:16-alpine
     environment:
@@ -43,6 +45,57 @@ services:
         limits:
           memory: 256M
 
+  chromadb:
+    image: chromadb/chroma:latest
+    volumes:
+      - chromadb_data:/chroma/chroma
+    networks:
+      - carbon-agent-net
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "bash -lc 'exec 3<>/dev/tcp/localhost/8000 && printf \"GET /api/v2/heartbeat HTTP/1.0\\r\\nHost: localhost\\r\\n\\r\\n\" >&3 && read -r status <&3 && [[ $$status == *200* ]]'",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  # ── Carbon Platform ───────────────────────────────────────────────────────
+
+  vector-store:
+    build:
+      context: ./vector-store
+      dockerfile: Dockerfile
+    environment:
+      CHROMA_HOST: chromadb
+      CHROMA_PORT: 8000
+      CHROMA_TENANT: ${CHROMA_TENANT:-default_tenant}
+      CHROMA_DATABASE: ${CHROMA_DATABASE:-default_database}
+      COLLECTION_NAME: ${CHROMA_COLLECTION:-carbon_documents}
+    networks:
+      - carbon-agent-net
+    depends_on:
+      chromadb:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 1G   # sentence-transformers model lives here
+
   orchestrator:
     build:
       context: ./orchestrator
@@ -65,13 +118,19 @@ services:
       SESSION_IDLE_TIMEOUT_MINUTES: ${SESSION_IDLE_TIMEOUT_MINUTES:-15}
       SESSION_MAX_LIFETIME_HOURS: ${SESSION_MAX_LIFETIME_HOURS:-24}
       SESSION_SPINUP_TIMEOUT_SECONDS: ${SESSION_SPINUP_TIMEOUT_SECONDS:-120}
+      # Clerk
       CLERK_SECRET_KEY: ${CLERK_SECRET_KEY:-}
       CLERK_PUBLISHABLE_KEY: ${CLERK_PUBLISHABLE_KEY:-}
       CLERK_WEBHOOK_SECRET: ${CLERK_WEBHOOK_SECRET:-}
       CLERK_JWT_PUBLIC_KEY: ${CLERK_JWT_PUBLIC_KEY:-}
       CLERK_FRONTEND_API_URL: ${CLERK_FRONTEND_API_URL:-}
       CLERK_JWT_ISSUER: ${CLERK_JWT_ISSUER:-}
-      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:8000}
+      CLERK_AUTHORIZED_ORIGINS: ${CLERK_AUTHORIZED_ORIGINS:-}
+      # RAG Gateway
+      VECTOR_STORE_URL: http://vector-store:8000
+      RAG_FIXED_TENANT_ID: ${RAG_FIXED_TENANT_ID:-contract-hub-tenant}
+      # CORS
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:3001,http://localhost:3002,http://localhost:8000}
       AUTO_CREATE_TABLES: ${AUTO_CREATE_TABLES:-true}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
@@ -81,6 +140,8 @@ services:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      vector-store:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
@@ -105,6 +166,10 @@ services:
       AGENT_API_URL: ${AGENT_API_URL:-http://localhost:5000}
       AGENT_API_KEY: ${AGENT_API_KEY:-}
       MODEL_NAME: ${MODEL_NAME:-carbon-agent}
+      LLM_PROVIDER: ${LLM_PROVIDER:-agent-zero}
+      LLM_BASE_URL: ${LLM_BASE_URL:-http://localhost:5000}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_MODEL_NAME: ${LLM_MODEL_NAME:-carbon-agent}
       AGENT_DOMAIN: ${AGENT_DOMAIN:-}
       REDIS_URL: redis://redis:6379/1
       USER_ID: ${ADAPTER_USER_ID:-}
@@ -137,7 +202,7 @@ services:
       OPENAI_API_BASE_URL: http://adapter:8000/v1
       OPENAI_API_KEY: ${OPENWEBUI_API_KEY:-sk-dev-test-key}
       WEBUI_SECRET_KEY: ${WEBUI_SECRET:-dev-secret}
-      CLERK_ENABLED: ${OPENWEBUI_CLERK_ENABLED:-false}
+      CLERK_ENABLED: ${OPENWEBUI_CLERK_ENABLED:-true}
       CLERK_PUBLISHABLE_KEY: ${CLERK_PUBLISHABLE_KEY:-}
       CLERK_SECRET_KEY: ${CLERK_SECRET_KEY:-}
       CLERK_FRONTEND_API_URL: ${CLERK_FRONTEND_API_URL:-}
@@ -146,6 +211,9 @@ services:
       ENABLE_SIGNUP: "false"
       WEBUI_AUTH: "true"
       DEFAULT_USER_ROLE: user
+      WEBUI_ADMIN_EMAIL: ${WEBUI_ADMIN_EMAIL:-admin@carbon.local}
+      WEBUI_ADMIN_PASSWORD: ${WEBUI_ADMIN_PASSWORD:-CarbonUI-FirstAdmin-ChangeMe!}
+      WEBUI_ADMIN_NAME: ${WEBUI_ADMIN_NAME:-Carbon Admin}
       CORS_ALLOW_ORIGIN: "*"
     networks:
       - carbon-agent-net
@@ -168,10 +236,129 @@ services:
         limits:
           memory: 2G
 
+  dashboard:
+    build:
+      context: ../carbon-agent-dashboard
+      dockerfile: Dockerfile
+    ports:
+      - "${DASHBOARD_PORT:-3001}:3000"
+    environment:
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${CLERK_PUBLISHABLE_KEY:-}
+      CLERK_SECRET_KEY: ${CLERK_SECRET_KEY:-}
+      NEXT_PUBLIC_HUB_ADMIN_EMAIL: ${WEBUI_ADMIN_EMAIL:-admin@carbon.local}
+      CARBON_ORCHESTRATOR_URL: http://orchestrator:8000
+      FEATHERLESS_API_KEY: ${FEATHERLESS_API_KEY:-}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ADMIN_AGENT_ENABLED: ${ADMIN_AGENT_ENABLED:-false}
+      ADMIN_AGENT_SSH_TARGET: ${ADMIN_AGENT_SSH_TARGET:-}
+      ADMIN_AGENT_CONTROL_TOKEN: ${ADMIN_AGENT_CONTROL_TOKEN:-}
+      ADMIN_AGENT_TIMEOUT_SECONDS: ${ADMIN_AGENT_TIMEOUT_SECONDS:-90}
+      ADMIN_AGENT_REMOTE_DIR: ${ADMIN_AGENT_REMOTE_DIR:-/opt/carbon-agent-platform}
+      ADMIN_AGENT_ALLOWED_SERVICES: ${ADMIN_AGENT_ALLOWED_SERVICES:-orchestrator,adapter,open-webui,dashboard,vector-store,contract-hub,contract-hub-postgres,postgres,redis,chromadb}
+    networks:
+      - carbon-agent-net
+    depends_on:
+      orchestrator:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 45s
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+
+  # ── Contract Hub ──────────────────────────────────────────────────────────
+
+  contract-hub-postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: contracthub
+      POSTGRES_USER: contracthub
+      POSTGRES_PASSWORD: ${CONTRACT_HUB_POSTGRES_PASSWORD:-contracthub}
+    ports:
+      - "${CONTRACT_HUB_POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - contract_hub_pgdata:/var/lib/postgresql/data
+    networks:
+      - carbon-agent-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U contracthub -d contracthub"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  contract-hub:
+    build:
+      context: ${CONTRACT_HUB_PATH:-../contract-hub}
+      dockerfile: Dockerfile
+    ports:
+      - "${CONTRACT_HUB_PORT:-3002}:3000"
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      HOSTNAME: 0.0.0.0
+      DATABASE_URL: postgresql://contracthub:${CONTRACT_HUB_POSTGRES_PASSWORD:-contracthub}@contract-hub-postgres:5432/contracthub
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${CLERK_PUBLISHABLE_KEY:-}
+      CLERK_SECRET_KEY: ${CLERK_SECRET_KEY:-}
+      NEXT_PUBLIC_CLERK_SIGN_IN_URL: /sign-in
+      NEXT_PUBLIC_CLERK_SIGN_UP_URL: /sign-up
+      NEXT_PUBLIC_CLERK_SIGN_IN_FALLBACK_REDIRECT_URL: /dashboard
+      NEXT_PUBLIC_CLERK_SIGN_UP_FALLBACK_REDIRECT_URL: /dashboard
+      CARBON_RAG_BASE_URL: http://orchestrator:8000
+      CARBON_RAG_TENANT_ID: ${CONTRACT_HUB_TENANT_ID:-contract-hub-tenant}
+      TENANT_ID: ${CONTRACT_HUB_TENANT_ID:-contract-hub-tenant}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENROUTER_BASE_URL: ${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
+      DOCASSEMBLE_URL: ${CONTRACT_HUB_DOCASSEMBLE_URL:-}
+      DOCASSEMBLE_API_KEY: ${CONTRACT_HUB_DOCASSEMBLE_API_KEY:-}
+      OPENCODE_SERVER_URL: ${CONTRACT_HUB_OPENCODE_SERVER_URL:-}
+      OPENCODE_API_KEY: ${CONTRACT_HUB_OPENCODE_API_KEY:-}
+      NEXT_PUBLIC_APP_NAME: Contract Hub
+      NEXT_PUBLIC_APP_ORG: Corporate Carbon Group Australia
+      NEXT_PUBLIC_APP_DESCRIPTION: Legal Operations Platform
+    networks:
+      - carbon-agent-net
+    depends_on:
+      contract-hub-postgres:
+        condition: service_healthy
+      orchestrator:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/api/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 15s
+      retries: 3
+      start_period: 90s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+
 volumes:
   pgdata:
   redis_data:
   openwebui:
+  chromadb_data:
+  contract_hub_pgdata:
 
 networks:
   carbon-agent-net:

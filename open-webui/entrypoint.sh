@@ -25,6 +25,9 @@ else
     echo "[Carbon Agent] Clerk disabled (CLERK_ENABLED=false) -- skipping Clerk var checks"
 fi
 
+# Keep the admin email used by the config file aligned with the bootstrap user.
+export ADMIN_EMAIL="${ADMIN_EMAIL:-${WEBUI_ADMIN_EMAIL:-admin@example.com}}"
+
 # Substitute environment variables into config.json
 if [ -f "/app/backend/data/config.json.template" ]; then
     echo "[Carbon Agent] Substituting environment variables into config.json..."
@@ -41,8 +44,6 @@ if [ -f "/app/backend/data/config.json.template" ]; then
     export FONT_FAMILY="${FONT_FAMILY:-Inter, system-ui, -apple-system, sans-serif}"
     export WELCOME_MESSAGE="${WELCOME_MESSAGE:-Welcome to The Intelligence Hub}"
     export FOOTER_TEXT="${FOOTER_TEXT:-Powered by Carbon Agent Platform}"
-    export ADMIN_EMAIL="${ADMIN_EMAIL:-admin@example.com}"
-    
     envsubst < /app/backend/data/config.json.template > /app/backend/data/config.json
     echo "[Carbon Agent] Config substitution complete."
 else
@@ -58,6 +59,12 @@ fi
 # Patch index.html to inject clerk-integration.js
 if [ -f "/app/build/index.html" ]; then
     echo "[Carbon Agent] Patching index.html to inject clerk-integration.js..."
+
+    # Ensure the script is present in the served build static directory.
+    if [ -f "/app/static/clerk-integration.js" ] && [ ! -f "/app/build/static/clerk-integration.js" ]; then
+        mkdir -p /app/build/static
+        cp /app/static/clerk-integration.js /app/build/static/clerk-integration.js
+    fi
     
     # Check if already patched
     if ! grep -q 'clerk-integration.js' /app/build/index.html; then

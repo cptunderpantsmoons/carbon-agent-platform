@@ -212,6 +212,9 @@ services:
       ENABLE_SIGNUP: "false"
       WEBUI_AUTH: "true"
       DEFAULT_USER_ROLE: user
+      WEBUI_ADMIN_EMAIL: ${WEBUI_ADMIN_EMAIL:-admin@carbon.local}
+      WEBUI_ADMIN_PASSWORD: ${WEBUI_ADMIN_PASSWORD:-CarbonUI-FirstAdmin-ChangeMe!}
+      WEBUI_ADMIN_NAME: ${WEBUI_ADMIN_NAME:-Carbon Admin}
       # CORS & Network
       CORS_ALLOW_ORIGIN: "*"
       REQUEST_TIMEOUT_SECONDS: 120
@@ -248,6 +251,12 @@ services:
     environment:
       NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${CLERK_PUBLISHABLE_KEY:-}
       CLERK_SECRET_KEY: ${CLERK_SECRET_KEY:-}
+      NEXT_PUBLIC_HUB_ADMIN_EMAIL: ${WEBUI_ADMIN_EMAIL:-admin@carbon.local}
+      CARBON_ORCHESTRATOR_URL: http://orchestrator:8000
+      FEATHERLESS_API_KEY: ${FEATHERLESS_API_KEY:-}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
     depends_on:
       - orchestrator
     healthcheck:

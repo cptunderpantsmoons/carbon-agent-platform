@@ -55,8 +55,11 @@ docker compose -f docker-compose.infra.yml up -d
 # 4. Deploy application
 docker compose up -d --build
 
+# Contract Hub starts alongside Carbon at http://localhost:3002
+# Both apps reuse the same Clerk instance and Carbon RAG service
+
 # 5. Verify deployment
-docker ps  # Should show orchestrator, adapter, traefik, postgres, redis
+ docker ps  # Should show orchestrator, adapter, open-webui, contract-hub, and their databases
 curl http://localhost:8000/health
 ```
 
@@ -88,7 +91,18 @@ AGENT_BASE_PATH=/agent
 ADMIN_AGENT_API_KEY=your-admin-key
 
 # CORS
-CORS_ALLOWED_ORIGINS=https://agents.carbon.dev
+CORS_ALLOWED_ORIGINS=https://agents.carbon.dev,https://contract-hub.example.com
+
+# Contract Hub
+CONTRACT_HUB_PATH=../contract-hub
+CONTRACT_HUB_PORT=3002
+CONTRACT_HUB_POSTGRES_PORT=5433
+CONTRACT_HUB_POSTGRES_PASSWORD=your-contract-hub-db-password
+CONTRACT_HUB_TENANT_ID=contract-hub-tenant
+CONTRACT_HUB_DOCASSEMBLE_URL=
+CONTRACT_HUB_DOCASSEMBLE_API_KEY=
+CONTRACT_HUB_OPENCODE_SERVER_URL=
+CONTRACT_HUB_OPENCODE_API_KEY=
 ```
 
 ## Quick Start (Development)
@@ -96,6 +110,8 @@ CORS_ALLOWED_ORIGINS=https://agents.carbon.dev
 ```bash
 # Start services
 docker compose up --build
+
+# Contract Hub is available at http://localhost:3002
 
 # Create a user via admin API
 curl -X POST http://localhost:8000/admin/users \
@@ -107,6 +123,10 @@ curl -X POST http://localhost:8000/admin/users \
 # Settings -> Connections -> OpenAI API
 # Base URL: http://localhost:8001/v1
 # API Key: (from user creation response)
+
+# On a fresh deploy, Open WebUI boots with the admin account from
+# WEBUI_ADMIN_EMAIL / WEBUI_ADMIN_PASSWORD so the first login can happen
+# without reopening public sign-up.
 ```
 
 ## User Provisioning Flow

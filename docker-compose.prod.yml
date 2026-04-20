@@ -136,6 +136,10 @@ services:
       AGENT_API_KEY: ${AGENT_API_KEY:?error - set AGENT_API_KEY}
       # LLM
       MODEL_NAME: ${MODEL_NAME:-carbon-agent}
+      LLM_PROVIDER: ${LLM_PROVIDER:-agent-zero}
+      LLM_BASE_URL: ${LLM_BASE_URL:-http://localhost:5000}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_MODEL_NAME: ${LLM_MODEL_NAME:-carbon-agent}
       # Traefik routing
       AGENT_DOMAIN: ${AGENT_DOMAIN:?error - set AGENT_DOMAIN}
       # Context store
@@ -178,7 +182,11 @@ services:
     volumes:
       - vector_data:/chroma/chroma_db
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8000/api/v1/heartbeat || exit 1"]
+      test:
+        [
+          "CMD-SHELL",
+          "bash -lc 'exec 3<>/dev/tcp/localhost/8000 && printf \"GET /api/v2/heartbeat HTTP/1.0\\r\\nHost: localhost\\r\\n\\r\\n\" >&3 && read -r status <&3 && [[ $$status == *200* ]]'",
+        ]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -209,6 +217,8 @@ services:
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-all-MiniLM-L6-v2}
       CHROMA_HOST: chromadb
       CHROMA_PORT: 8000
+      CHROMA_TENANT: ${CHROMA_TENANT:-default_tenant}
+      CHROMA_DATABASE: ${CHROMA_DATABASE:-default_database}
       COLLECTION_NAME: ${VECTOR_COLLECTION_NAME:-carbon_documents}
     depends_on:
       chromadb:
@@ -258,6 +268,9 @@ services:
       ENABLE_SIGNUP: "false"
       WEBUI_AUTH: "true"
       DEFAULT_USER_ROLE: user
+      WEBUI_ADMIN_EMAIL: ${WEBUI_ADMIN_EMAIL:?error - set WEBUI_ADMIN_EMAIL}
+      WEBUI_ADMIN_PASSWORD: ${WEBUI_ADMIN_PASSWORD:?error - set WEBUI_ADMIN_PASSWORD}
+      WEBUI_ADMIN_NAME: ${WEBUI_ADMIN_NAME:-Carbon Admin}
       # CORS & Network
       CORS_ALLOW_ORIGIN: ${WEBUI_CORS_ORIGIN:?error - set WEBUI_CORS_ORIGIN}
       REQUEST_TIMEOUT_SECONDS: 120
@@ -302,6 +315,18 @@ services:
     environment:
       NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${CLERK_PUBLISHABLE_KEY:?error - set CLERK_PUBLISHABLE_KEY}
       CLERK_SECRET_KEY: ${CLERK_SECRET_KEY:?error - set CLERK_SECRET_KEY}
+      NEXT_PUBLIC_HUB_ADMIN_EMAIL: ${WEBUI_ADMIN_EMAIL:?error - set WEBUI_ADMIN_EMAIL}
+      CARBON_ORCHESTRATOR_URL: http://orchestrator:8000
+      FEATHERLESS_API_KEY: ${FEATHERLESS_API_KEY:-}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ADMIN_AGENT_ENABLED: ${ADMIN_AGENT_ENABLED:-false}
+      ADMIN_AGENT_SSH_TARGET: ${ADMIN_AGENT_SSH_TARGET:-}
+      ADMIN_AGENT_CONTROL_TOKEN: ${ADMIN_AGENT_CONTROL_TOKEN:-}
+      ADMIN_AGENT_TIMEOUT_SECONDS: ${ADMIN_AGENT_TIMEOUT_SECONDS:-90}
+      ADMIN_AGENT_REMOTE_DIR: ${ADMIN_AGENT_REMOTE_DIR:-/opt/carbon-agent-platform}
+      ADMIN_AGENT_ALLOWED_SERVICES: ${ADMIN_AGENT_ALLOWED_SERVICES:-orchestrator,adapter,open-webui,dashboard,vector-store,contract-hub,contract-hub-postgres,postgres,redis,chromadb}
     depends_on:
       - orchestrator
     healthcheck:
@@ -324,11 +349,106 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  contract-hub-postgres:
+    image: postgres:16-alpine@sha256:caf32b35a1e14d1f56b0b87f4d1f7a8f7c1c8a8a0f9e1d3c6b7a8a1f2e4d7c9
+    container_name: contract_hub_postgres_prod
+    restart: always
+    environment:
+      POSTGRES_DB: contracthub
+      POSTGRES_USER: contracthub
+      POSTGRES_PASSWORD: ${CONTRACT_HUB_POSTGRES_PASSWORD:?error - set CONTRACT_HUB_POSTGRES_PASSWORD}
+    ports:
+      - "127.0.0.1:${CONTRACT_HUB_POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - contract_hub_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U contracthub -d contracthub"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
+    networks:
+      - carbon_network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  contract-hub:
+    build:
+      context: ${CONTRACT_HUB_PATH:-../contract-hub}
+      dockerfile: Dockerfile
+    container_name: contract_hub_prod
+    restart: always
+    ports:
+      - "127.0.0.1:${CONTRACT_HUB_PORT:-3002}:3000"
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      HOSTNAME: 0.0.0.0
+      DATABASE_URL: postgresql://contracthub:${CONTRACT_HUB_POSTGRES_PASSWORD:?error - set CONTRACT_HUB_POSTGRES_PASSWORD}@contract-hub-postgres:5432/contracthub
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${CLERK_PUBLISHABLE_KEY:?error - set CLERK_PUBLISHABLE_KEY}
+      CLERK_SECRET_KEY: ${CLERK_SECRET_KEY:?error - set CLERK_SECRET_KEY}
+      NEXT_PUBLIC_CLERK_SIGN_IN_URL: /sign-in
+      NEXT_PUBLIC_CLERK_SIGN_UP_URL: /sign-up
+      NEXT_PUBLIC_CLERK_SIGN_IN_FALLBACK_REDIRECT_URL: /dashboard
+      NEXT_PUBLIC_CLERK_SIGN_UP_FALLBACK_REDIRECT_URL: /dashboard
+      CARBON_RAG_BASE_URL: http://orchestrator:8000
+      CARBON_RAG_TENANT_ID: ${CONTRACT_HUB_TENANT_ID:?error - set CONTRACT_HUB_TENANT_ID}
+      TENANT_ID: ${CONTRACT_HUB_TENANT_ID:?error - set CONTRACT_HUB_TENANT_ID}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENROUTER_BASE_URL: ${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
+      DOCASSEMBLE_URL: ${CONTRACT_HUB_DOCASSEMBLE_URL:-}
+      DOCASSEMBLE_API_KEY: ${CONTRACT_HUB_DOCASSEMBLE_API_KEY:-}
+      OPENCODE_SERVER_URL: ${CONTRACT_HUB_OPENCODE_SERVER_URL:-}
+      OPENCODE_API_KEY: ${CONTRACT_HUB_OPENCODE_API_KEY:-}
+      NEXT_PUBLIC_APP_NAME: Contract Hub
+      NEXT_PUBLIC_APP_ORG: Corporate Carbon Group Australia
+      NEXT_PUBLIC_APP_DESCRIPTION: Legal Operations Platform
+    depends_on:
+      contract-hub-postgres:
+        condition: service_healthy
+      orchestrator:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/api/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 15s
+      retries: 3
+      start_period: 90s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
+    networks:
+      - carbon_network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
 volumes:
   pgdata:
   redis_data:
   openwebui:
   vector_data:
+  contract_hub_pgdata:
 
 networks:
   carbon_network:

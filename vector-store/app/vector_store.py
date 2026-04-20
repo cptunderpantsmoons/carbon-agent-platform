@@ -1,10 +1,8 @@
 """Vector database management using ChromaDB HTTP client."""
 
-import os
 from typing import List, Dict, Optional
 import chromadb
-from chromadb.config import Settings as ChromaSettings
-from sentence_transformers import SentenceTransformer
+from fastembed import TextEmbedding
 from app.config import settings
 
 
@@ -18,11 +16,13 @@ class VectorStore:
             host=settings.chroma_host,
             port=settings.chroma_port,
             ssl=False,
+            tenant=settings.chroma_tenant,
+            database=settings.chroma_database,
         )
 
-        # Initialize embedding model
+        # Initialize embedding model (fastembed / ONNX — no PyTorch required)
         print(f"Loading embedding model: {settings.embedding_model}")
-        self.embedding_model = SentenceTransformer(settings.embedding_model)
+        self.embedding_model = TextEmbedding(settings.embedding_model)
         print("Embedding model loaded.")
 
         # Get or create collection
@@ -32,9 +32,33 @@ class VectorStore:
         )
 
     def _generate_embeddings(self, texts: List[str]) -> List[List[float]]:
-        """Generate embeddings for a list of texts."""
-        embeddings = self.embedding_model.encode(texts, show_progress_bar=False)
-        return embeddings.tolist()
+        """Generate embeddings for a list of texts using fastembed (ONNX)."""
+        # fastembed returns a generator of numpy arrays; convert to list of lists.
+        return [emb.tolist() for emb in self.embedding_model.embed(texts)]
+
+    def _normalize_where_filter(self, where_filter: Optional[Dict]) -> Optional[Dict]:
+        """Normalize a metadata filter before sending it to Chroma."""
+        if not where_filter or any(key.startswith("$") for key in where_filter):
+            return where_filter
+
+        document_id = where_filter.get("document_id")
+        if document_id is None:
+            return where_filter
+
+        clauses = [{key: value} for key, value in where_filter.items() if key != "document_id"]
+        clauses.append(
+            {
+                "$or": [
+                    {"document_id": document_id},
+                    {"doc_id": document_id},
+                ]
+            }
+        )
+
+        if len(clauses) == 1:
+            return clauses[0]
+
+        return {"$and": clauses}
 
     def add_documents(
         self,
@@ -103,6 +127,7 @@ class VectorStore:
     ) -> Dict:
         """Search the vector store for relevant documents."""
         query_embedding = self.embedding_model.encode([query]).tolist()
+        chroma_where_filter = self._normalize_where_filter(where_filter)
         
         search_params = {
             "query_embeddings": query_embedding,
@@ -110,8 +135,8 @@ class VectorStore:
             "include": ["documents", "metadatas", "distances"],
         }
         
-        if where_filter:
-            search_params["where"] = where_filter
+        if chroma_where_filter:
+            search_params["where"] = chroma_where_filter
         
         results = self.collection.query(**search_params)
         
@@ -139,14 +164,35 @@ class VectorStore:
             "total_found": len(formatted_results),
         }
 
-    def get_stats(self) -> Dict:
+    def get_stats(self, where_filter: Optional[Dict] = None) -> Dict:
         """Get vector store statistics."""
         count = self.collection.count()
+        if where_filter:
+            results = self.collection.get(
+                where=self._normalize_where_filter(where_filter),
+                include=[],
+            )
+            count = len(results.get("ids", []))
+
         return {
             "total_documents": count,
             "collection_name": settings.collection_name,
             "embedding_model": settings.embedding_model,
         }
+
+    def delete_documents(self, where_filter: Dict) -> int:
+        """Delete documents only within the supplied metadata scope."""
+        if not where_filter:
+            raise ValueError("where_filter is required for scoped deletes")
+
+        normalized_where_filter = self._normalize_where_filter(where_filter)
+        matches = self.collection.get(where=normalized_where_filter, include=[])
+        matching_ids = matches.get("ids", [])
+        if not matching_ids:
+            return 0
+
+        self.collection.delete(where=normalized_where_filter)
+        return len(matching_ids)
 
     def clear(self):
         """Clear all documents from the vector store."""
