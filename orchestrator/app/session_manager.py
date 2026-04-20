@@ -88,13 +88,35 @@ class SessionManager:
                     logger.error("user_not_found", user_id=user_id)
                     return False, None
 
-                # Check if user already has a service
-                if user.status == UserStatus.ACTIVE:
-                    logger.info(
-                        "user_already_has_service",
-                        user_id=user_id,
-                    )
+                if user.status == UserStatus.SUSPENDED:
+                    logger.info("user_suspended_no_service", user_id=user_id)
                     return False, None
+
+                # Treat ACTIVE as "should have service"; if the container is missing,
+                # provision it again so onboarding and manual recovery stay idempotent.
+                if user.status == UserStatus.ACTIVE:
+                    try:
+                        container_status = await self.docker_manager.get_container_status(user_id)
+                    except Exception as e:
+                        logger.warning(
+                            "container_status_check_failed",
+                            user_id=user_id,
+                            error=str(e),
+                        )
+                        container_status = "missing"
+
+                    if container_status == "running":
+                        logger.info(
+                            "user_already_has_service",
+                            user_id=user_id,
+                        )
+                        return False, None
+
+                    logger.info(
+                        "user_active_without_container_reprovisioning",
+                        user_id=user_id,
+                        container_status=container_status,
+                    )
 
                 # Spin up new service
                 logger.info("spinning_up_service", user_id=user_id)
@@ -104,6 +126,7 @@ class SessionManager:
                 return True, None
 
             except Exception as e:
+                await db.rollback()
                 logger.error("ensure_user_service_error", user_id=user_id, error=str(e))
                 raise
 
@@ -187,6 +210,7 @@ class SessionManager:
                 return True
 
             except Exception as e:
+                await db.rollback()
                 logger.error("spin_down_error", user_id=user_id, error=str(e))
                 raise
             # No finally/_remove_lock: WeakValueDictionary handles cleanup automatically

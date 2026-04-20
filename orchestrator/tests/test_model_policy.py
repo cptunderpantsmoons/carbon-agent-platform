@@ -94,7 +94,7 @@ def test_public_policy_endpoint(app_with_policy):
     """Test that /v1/model-policy/me returns a default policy via endpoint."""
     client = TestClient(app_with_policy, raise_server_exceptions=False)
 
-    with patch("app.model_policy._get_or_create_policy") as mock_get:
+    with patch("app.model_policy._get_policy_or_default") as mock_get:
         mock_policy = MagicMock()
         mock_policy.id = "policy-001"
         mock_policy.tenant_id = "default"

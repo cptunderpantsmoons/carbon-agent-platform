@@ -95,3 +95,25 @@ class DockerContainerCreate(BaseModel):
     memory_limit: str = "512m"
     cpu_nanos: int = 500000000
     env_vars: dict[str, str] | None = None
+
+
+# --- Model Policy schemas ---
+
+class ModelPolicySchema(BaseModel):
+    id: str
+    tenant_id: str
+    routing_mode: str
+    default_provider: str
+    allowed_providers: list[str] | None = None
+    benchmark_mode: bool
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class ModelPolicyUpdate(BaseModel):
+    routing_mode: str | None = None
+    default_provider: str | None = None
+    allowed_providers: list[str] | None = None
+    benchmark_mode: bool | None = None

@@ -18,6 +18,18 @@ model_policy_router = APIRouter(prefix="/admin", tags=["model-policy"])
 public_policy_router = APIRouter(prefix="/v1", tags=["model-policy"])
 
 
+def _build_default_policy(tenant_id: str) -> ModelPolicy:
+    """Create the default policy object for a tenant."""
+    return ModelPolicy(
+        id=str(uuid.uuid4()),
+        tenant_id=tenant_id,
+        routing_mode="auto",
+        default_provider="featherless",
+        allowed_providers=["featherless", "deepseek", "openai", "anthropic"],
+        benchmark_mode=True,
+    )
+
+
 async def _get_or_create_policy(db: AsyncSession, tenant_id: str = "default") -> ModelPolicy:
     """Fetch existing policy or create a default one."""
     result = await db.execute(
@@ -28,14 +40,7 @@ async def _get_or_create_policy(db: AsyncSession, tenant_id: str = "default") ->
     policy = result.scalars().first()
 
     if policy is None:
-        policy = ModelPolicy(
-            id=str(uuid.uuid4()),
-            tenant_id=tenant_id,
-            routing_mode="auto",
-            default_provider="featherless",
-            allowed_providers=["featherless", "deepseek", "openai", "anthropic"],
-            benchmark_mode=True,
-        )
+        policy = _build_default_policy(tenant_id)
         db.add(policy)
         try:
             await db.commit()
@@ -53,6 +58,19 @@ async def _get_or_create_policy(db: AsyncSession, tenant_id: str = "default") ->
                 raise
 
     return policy
+
+
+async def _get_policy_or_default(db: AsyncSession, tenant_id: str = "default") -> ModelPolicy:
+    """Fetch the current policy without mutating the database."""
+    result = await db.execute(
+        select(ModelPolicy)
+        .where(ModelPolicy.tenant_id == tenant_id)
+        .order_by(ModelPolicy.created_at.asc())
+    )
+    policy = result.scalars().first()
+    if policy is not None:
+        return policy
+    return _build_default_policy(tenant_id)
 
 
 @model_policy_router.get("/model-policy", response_model=ModelPolicySchema)
@@ -94,6 +112,6 @@ async def update_model_policy(
 async def get_my_model_policy(
     db: AsyncSession = Depends(get_session),
 ) -> ModelPolicy:
-    """Read the model policy for the current tenant (public, no auth required for read)."""
-    policy = await _get_or_create_policy(db)
+    """Read the model policy for runtime clients without creating rows."""
+    policy = await _get_policy_or_default(db)
     return policy

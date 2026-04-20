@@ -30,8 +30,11 @@ SYNC_FILES = [
     "README.md",
     ".env.example",
     ".env.production.example",
+    "adapter/app/config.py",
+    "adapter/requirements.txt",
     "open-webui/Dockerfile",
     "open-webui/entrypoint.sh",
+    "adapter/app/main.py",
 ]
 
 DASHBOARD_SYNC_FILES = [
@@ -50,18 +53,42 @@ DASHBOARD_SYNC_FILES = [
     "app/globals.css",
     "app/health/route.ts",
     "app/dashboard/page.tsx",
-    "app/components/intelligence-hub.tsx",
-    "app/lib/clerk.tsx",
+    "app/chat/page.tsx",
+    "app/benchmarks/page.tsx",
+    "app/admin/page.tsx",
+    "app/sign-in/page.tsx",
+    "app/sign-up/page.tsx",
+    "app/components/shell/sidebar.tsx",
+    "app/components/shell/top-bar.tsx",
+    "app/components/shell/app-shell.tsx",
+    "app/components/theme-toggle.tsx",
     "app/lib/admin-agent.js",
     "app/lib/model-catalog.js",
-    "app/lib/provider-exec.js",
     "app/api/admin-agent/route.ts",
     "app/api/chat/route.ts",
     "app/api/benchmarks/route.ts",
+    "app/api/documents/route.ts",
     "app/api/orchestrator/[...path]/route.ts",
+    "app/contracts/page.tsx",
+    "app/documents/page.tsx",
+    "app/skills/page.tsx",
+    "app/lib/theme/provider.tsx",
+    "app/lib/theme/engine.ts",
+    "app/lib/theme/tokens.ts",
+    "app/lib/theme/telemetry.ts",
     "public/.gitkeep",
     "tests/admin-agent.test.mjs",
     "tests/model-catalog.test.mjs",
+    "tests/auth-smoke.test.mjs",
+    "tests/chat-route.test.mjs",
+]
+
+ORCHESTRATOR_SYNC_FILES = [
+    "orchestrator/app/models.py",
+    "orchestrator/app/schemas.py",
+    "orchestrator/app/main.py",
+    "orchestrator/app/model_policy.py",
+    "orchestrator/tests/test_model_policy.py",
 ]
 
 # ── Colours (ANSI, safe for Linux terminal via SSH) ──────────────────────────
@@ -143,6 +170,38 @@ def sync_dashboard_files(ssh, files):
         sftp.close()
 
 
+def sync_orchestrator_files(ssh, files):
+    """Upload local orchestrator files to the remote platform checkout."""
+    sftp = ssh.open_sftp()
+    try:
+        for rel_path in files:
+            local_path = BASE_DIR / rel_path
+            remote_path = f"{DIR}/{rel_path.replace(os.sep, '/')}"
+            if not local_path.exists():
+                raise FileNotFoundError(f"Missing local orchestrator file: {local_path}")
+
+            remote_dir = os.path.dirname(remote_path)
+            run(ssh, f"mkdir -p {remote_dir}", timeout=30, show=False)
+            content = local_path.read_text(encoding="utf-8")
+            content = content.replace("\r\n", "\n")
+            with sftp.file(remote_path, "w") as remote_file:
+                remote_file.write(content)
+    finally:
+        sftp.close()
+
+
+def cleanup_deleted_dashboard_files(ssh):
+    """Remove legacy files that no longer exist in the new architecture."""
+    deleted = [
+        "app/components/intelligence-hub.tsx",
+        "app/lib/clerk.tsx",
+        "app/lib/provider-exec.js",
+    ]
+    for rel_path in deleted:
+        remote_path = f"{HUB_DIR}/{rel_path}"
+        run(ssh, f"rm -f {remote_path}", timeout=30, show=False)
+
+
 def parse_env_text(env_text):
     """Parse simple KEY=VALUE lines into a dictionary."""
     parsed = {}
@@ -158,6 +217,30 @@ def parse_env_text(env_text):
 def serialize_env(env_map):
     """Serialize an environment mapping as KEY=VALUE lines."""
     return "\n".join(f"{key}={value}" for key, value in env_map.items()) + "\n"
+
+
+def _resolve_value(name, *candidates):
+    """Return the first non-empty candidate or raise for missing required values."""
+    for candidate in candidates:
+        value = (candidate or "").strip()
+        if value:
+            return value
+    raise RuntimeError(f"Missing required value for {name}")
+
+
+def _is_local_or_placeholder_url(url):
+    """Reject localhost and placeholder Clerk URLs for deployed environments."""
+    if not url:
+        return True
+    lowered = url.strip().lower()
+    return (
+        lowered.startswith("http://localhost")
+        or lowered.startswith("https://localhost")
+        or lowered.startswith("http://127.")
+        or lowered.startswith("https://127.")
+        or lowered.startswith("http://0.0.0.0")
+        or lowered in {"pk_test_dummy", "sk_test_dummy"}
+    )
 
 
 def deploy():
@@ -187,10 +270,11 @@ def deploy():
     # ── 3. Repo ──────────────────────────────────────────────────────────────
     step(3, STEPS, "Cloning / updating repo ...")
     code, _ = run(ssh, f"test -d {DIR}/.git", show=False, check=False)
+    BRANCH = "feat/corporate-carbon-hub-pass-1"
     if code == 0:
-        run(ssh, f"cd {DIR} && git fetch origin && git reset --hard origin/master", timeout=60)
+        run(ssh, f"cd {DIR} && git fetch origin && git reset --hard origin/{BRANCH}", timeout=60)
     else:
-        run(ssh, f"git clone {REPO} {DIR}", timeout=120)
+        run(ssh, f"git clone -b {BRANCH} {REPO} {DIR}", timeout=120)
     ok("Repo up to date")
 
     step(4, STEPS, "Syncing local fix files to the VPS checkout ...")
@@ -200,17 +284,66 @@ def deploy():
     step(5, STEPS, "Syncing Intelligence Hub files to the VPS checkout ...")
     run(ssh, f"mkdir -p {HUB_DIR}", timeout=30, show=False)
     sync_dashboard_files(ssh, DASHBOARD_SYNC_FILES)
+    cleanup_deleted_dashboard_files(ssh)
     ok("Dashboard workspace files uploaded")
+
+    step(5, STEPS, "Syncing orchestrator policy files to the VPS checkout ...")
+    sync_orchestrator_files(ssh, ORCHESTRATOR_SYNC_FILES)
+    ok("Orchestrator policy files uploaded")
 
     # ── 4. Env file ──────────────────────────────────────────────────────────
     step(6, STEPS, "Writing .env ...")
+
+    # Read existing server env first (needed for fallbacks)
+    existing_env = {}
+    code, existing_text = run(ssh, f"cat {DIR}/.env", show=False, check=False)
+    if code == 0:
+        existing_env = parse_env_text(existing_text)
+
     webui_admin_email = "admin@carbon.local"
     webui_admin_password = secrets.token_urlsafe(20)
     admin_agent_control_token = os.environ.get("ADMIN_AGENT_CONTROL_TOKEN", "").strip() or secrets.token_urlsafe(24)
     admin_agent_ssh_target = os.environ.get("ADMIN_AGENT_SSH_TARGET", "").strip() or "64Hk1NNpE19r6RaiWdwE7Pk7MgNThWKo@ssh.app.daytona.io"
-    deepseek_api_key = os.environ.get("DEEPSEEK_API_KEY", "").strip() or os.environ.get("LLM_API_KEY", "").strip()
-    if not deepseek_api_key:
-        raise RuntimeError("Set DEEPSEEK_API_KEY or LLM_API_KEY before running deploy_to_server.py")
+    deepseek_api_key = _resolve_value(
+        "DEEPSEEK_API_KEY",
+        os.environ.get("DEEPSEEK_API_KEY"),
+        os.environ.get("LLM_API_KEY"),
+        existing_env.get("DEEPSEEK_API_KEY"),
+        existing_env.get("LLM_API_KEY"),
+    )
+
+    local_dashboard_env = DASHBOARD_BASE_DIR / ".env.local"
+    local_env = {}
+    if local_dashboard_env.exists():
+        local_env = parse_env_text(local_dashboard_env.read_text(encoding="utf-8"))
+    # Read Clerk settings from local dashboard .env.local, env vars, or existing server env.
+    clerk_publishable_key = _resolve_value(
+        "CLERK_PUBLISHABLE_KEY",
+        os.environ.get("CLERK_PUBLISHABLE_KEY"),
+        local_env.get("NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY"),
+        local_env.get("CLERK_PUBLISHABLE_KEY"),
+        existing_env.get("CLERK_PUBLISHABLE_KEY"),
+    )
+    clerk_secret_key = _resolve_value(
+        "CLERK_SECRET_KEY",
+        os.environ.get("CLERK_SECRET_KEY"),
+        local_env.get("CLERK_SECRET_KEY"),
+        existing_env.get("CLERK_SECRET_KEY"),
+    )
+    clerk_frontend_api_url = _resolve_value(
+        "CLERK_FRONTEND_API_URL",
+        os.environ.get("CLERK_FRONTEND_API_URL"),
+        local_env.get("NEXT_PUBLIC_CLERK_FRONTEND_API_URL"),
+        local_env.get("CLERK_FRONTEND_API_URL"),
+        existing_env.get("CLERK_FRONTEND_API_URL"),
+    )
+
+    if _is_local_or_placeholder_url(clerk_publishable_key):
+        raise RuntimeError("Set a real CLERK_PUBLISHABLE_KEY before running deploy_to_server.py")
+    if _is_local_or_placeholder_url(clerk_secret_key):
+        raise RuntimeError("Set a real CLERK_SECRET_KEY before running deploy_to_server.py")
+    if _is_local_or_placeholder_url(clerk_frontend_api_url):
+        raise RuntimeError("Set a real CLERK_FRONTEND_API_URL before running deploy_to_server.py")
 
     desired_env = {
         "POSTGRES_USER": "postgres",
@@ -233,8 +366,10 @@ def deploy():
         "SESSION_IDLE_TIMEOUT_MINUTES": "15",
         "SESSION_MAX_LIFETIME_HOURS": "24",
         "SESSION_SPINUP_TIMEOUT_SECONDS": "120",
-        "CLERK_FRONTEND_API_URL": "http://localhost:3000",
-        f"CORS_ALLOWED_ORIGINS": f"http://{HOST}:3000,http://{HOST}:8000,http://{HOST}",
+        "CLERK_PUBLISHABLE_KEY": clerk_publishable_key,
+        "CLERK_SECRET_KEY": clerk_secret_key,
+        "CLERK_FRONTEND_API_URL": clerk_frontend_api_url,
+        f"CORS_ALLOWED_ORIGINS": f"http://{HOST}:3000,http://{HOST}:3001,http://{HOST}:3002,http://{HOST}:8000,http://{HOST}",
         "AUTO_CREATE_TABLES": "true",
         "WEBUI_SECRET": "dev-webui-secret-2024",
         "OPENWEBUI_API_KEY": "sk-dev-test-key",
@@ -261,11 +396,6 @@ def deploy():
         "ADMIN_AGENT_REMOTE_DIR": DIR,
         "ADMIN_AGENT_ALLOWED_SERVICES": "orchestrator,adapter,open-webui,dashboard,vector-store,contract-hub,contract-hub-postgres,postgres,redis,chromadb",
     }
-
-    existing_env = {}
-    code, existing_text = run(ssh, f"cat {DIR}/.env", show=False, check=False)
-    if code == 0:
-        existing_env = parse_env_text(existing_text)
 
     existing_env.update(desired_env)
 

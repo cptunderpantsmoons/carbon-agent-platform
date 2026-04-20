@@ -84,6 +84,7 @@ async def test_ensure_user_service_skips_existing_service(
 
     # Mock Docker manager (should not be called)
     mock_docker = AsyncMock()
+    mock_docker.get_container_status.return_value = "running"
 
     with patch.object(session_manager, "docker_manager", mock_docker):
         was_created, _ = await session_manager.ensure_user_service(mock_db, "test-user-1")
@@ -91,7 +92,38 @@ async def test_ensure_user_service_skips_existing_service(
         assert was_created is False
 
         # Verify Docker operations were NOT called
+        mock_docker.get_container_status.assert_called_once_with("test-user-1")
         mock_docker.ensure_user_service.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_ensure_user_service_recreates_missing_active_service(
+    session_manager,
+    mock_user,
+):
+    """Test that ensure_user_service reprovisions an active user without a container."""
+    mock_user.status = UserStatus.ACTIVE
+
+    mock_db = AsyncMock(spec=AsyncSession)
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none.return_value = mock_user
+    mock_db.execute.return_value = mock_result
+
+    mock_docker = AsyncMock()
+    mock_docker.get_container_status.return_value = "missing"
+    mock_docker.ensure_user_service.return_value = {
+        "action": "created",
+        "container_id": "abc123def456",
+        "was_created": True,
+    }
+
+    with patch.object(session_manager, "docker_manager", mock_docker):
+        was_created, _ = await session_manager.ensure_user_service(mock_db, "test-user-1")
+
+        assert was_created is True
+        assert mock_user.status == UserStatus.ACTIVE
+        mock_docker.get_container_status.assert_called_once_with("test-user-1")
+        mock_docker.ensure_user_service.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -312,6 +344,7 @@ async def test_concurrent_session_operations(
 
     # Mock Docker manager
     mock_docker = AsyncMock()
+    mock_docker.get_container_status.return_value = "running"
     mock_docker.ensure_user_service.return_value = {
         "action": "created",
         "container_id": "abc123",
@@ -492,26 +525,31 @@ async def test_provision_user_background_already_exists(session_manager, mock_us
 
     # Mock Docker manager (should not be called)
     mock_docker = AsyncMock()
+    mock_docker.get_container_status.return_value = "running"
 
     with patch.object(session_manager, "docker_manager", mock_docker):
         with patch("app.session_manager.create_session", return_value=mock_db):
             was_created = await session_manager.provision_user_background("test-user-1")
 
             assert was_created is False
+            mock_docker.get_container_status.assert_called_once_with("test-user-1")
             mock_docker.ensure_user_service.assert_not_called()
             mock_db.close.assert_called_once()
 
 
 @pytest.mark.asyncio
 async def test_provision_user_background_failure_raises(session_manager):
-    """Test that provision_user_background re-raises exceptions."""
-    # Mock database session returning None (user not found)
+    """Test that provision_user_background returns False when user not found."""
+    # Explicitly configure mock to return None for user lookup (user not found)
     mock_db = AsyncMock(spec=AsyncSession)
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none.return_value = None  # User not found in DB
+    mock_db.execute.return_value = mock_result
 
     with patch("app.session_manager.create_session", return_value=mock_db):
         result = await session_manager.provision_user_background("nonexistent-user")
 
-        # Should not raise, just return False
+        # User not found → ensure_user_service returns (False, None) → returns False
         assert result is False
         mock_db.close.assert_called_once()
 

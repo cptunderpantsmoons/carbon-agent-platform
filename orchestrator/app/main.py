@@ -20,6 +20,7 @@ from app.api_key_injection import ApiKeyInjectionMiddleware
 from app.config import get_settings
 from app.rate_limit import limiter, rate_limit_exceeded_handler
 from app.metrics import RequestIDMiddleware, metrics_endpoint
+from app.model_policy import model_policy_router, public_policy_router
 import structlog
 
 logger = structlog.get_logger()
@@ -166,10 +167,12 @@ app.add_middleware(ClerkRAGIdentityMiddleware)
 # Routers
 app.include_router(admin_router)
 app.include_router(admin_ui_router)
+app.include_router(model_policy_router)
 app.include_router(user_router)
 app.include_router(auth_router)
 app.include_router(clerk_webhook_router)
 app.include_router(rag_router)
+app.include_router(public_policy_router)
 
 
 @app.get("/health")
