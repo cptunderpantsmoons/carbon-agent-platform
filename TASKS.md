@@ -29,10 +29,10 @@
   - **Note:** Python 3.14 compatibility issues resolved for deployment
 - [x] **Task 5: Orchestrator API (Admin & User Endpoints)** ✅ (see Done)
 - [x] **Task 6: Docker & Railway Deployment Configs** ✅ (see Done)
-- [ ] **Task 7: Admin Agent Scheduler Tasks** — audit-log retention stub needs real DELETE SQL
+- [x] **Task 7: Admin Agent Scheduler Tasks** ✅ DONE (audit-log retention with ORM-aware DELETE)
 - [x] **Task 8: Open WebUI Integration Config** ✅ (see Done)
-- [ ] **Task 9: Register Admin Scheduler Tasks**
-- [ ] **Task 10: Integration Test Suite**
+- [x] **Task 9: Register Admin Scheduler Tasks** ✅ DONE
+- [x] **Task 10: Integration Test Suite** ✅ DONE
 
 ### Code Review Fixes (moon / code-puppy-79601d)
 
