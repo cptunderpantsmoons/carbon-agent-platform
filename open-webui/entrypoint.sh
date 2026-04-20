@@ -6,21 +6,23 @@ set -e
 
 echo "[Carbon Agent] Starting Open WebUI entrypoint..."
 
-# Required environment variables
-REQUIRED_VARS="CLERK_PUBLISHABLE_KEY CLERK_FRONTEND_API_URL"
-MISSING_VARS=""
-
-for var in $REQUIRED_VARS; do
-    eval "value=\$$var"
-    if [ -z "$value" ]; then
-        MISSING_VARS="$MISSING_VARS $var"
+# Only require Clerk vars when Clerk is explicitly enabled
+if [ "${CLERK_ENABLED:-false}" = "true" ]; then
+    REQUIRED_VARS="CLERK_PUBLISHABLE_KEY CLERK_FRONTEND_API_URL"
+    MISSING_VARS=""
+    for var in $REQUIRED_VARS; do
+        eval "value=\$$var"
+        if [ -z "$value" ]; then
+            MISSING_VARS="$MISSING_VARS $var"
+        fi
+    done
+    if [ -n "$MISSING_VARS" ]; then
+        echo "[Carbon Agent] ERROR: Missing required Clerk env vars:$MISSING_VARS"
+        echo "[Carbon Agent] Either set these variables or set CLERK_ENABLED=false"
+        exit 1
     fi
-done
-
-if [ -n "$MISSING_VARS" ]; then
-    echo "[Carbon Agent] ERROR: Missing required environment variables:$MISSING_VARS"
-    echo "[Carbon Agent] Please set these variables and restart the container."
-    exit 1
+else
+    echo "[Carbon Agent] Clerk disabled (CLERK_ENABLED=false) -- skipping Clerk var checks"
 fi
 
 # Substitute environment variables into config.json
