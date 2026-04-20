@@ -1,7 +1,7 @@
 """ORM models for users and audit logs."""
 from datetime import datetime, timezone
 from enum import Enum as PyEnum
-from sqlalchemy import String, DateTime, Enum, Text, JSON, ForeignKey
+from sqlalchemy import String, DateTime, Enum, Text, JSON, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
 
@@ -58,6 +58,25 @@ class Session(Base):
         onupdate=lambda: datetime.now(timezone.utc),
     )
     user: Mapped["User"] = relationship("User", back_populates="sessions")
+
+
+class ModelPolicy(Base):
+    __tablename__ = "model_policies"
+    __table_args__ = (UniqueConstraint("tenant_id", name="uq_model_policies_tenant_id"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), index=True, unique=True, default="default")
+    routing_mode: Mapped[str] = mapped_column(String(32), default="auto")
+    default_provider: Mapped[str] = mapped_column(String(64), default="featherless")
+    allowed_providers: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    benchmark_mode: Mapped[bool] = mapped_column(default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
 
 
 class AuditLog(Base):

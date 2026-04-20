@@ -12,16 +12,20 @@ def test_parse_request():
     data = {
         "model": "gpt-4",
         "messages": [
-            {"role": "system", "content": "You are helpful."},
-            {"role": "user", "content": "Hello!"},
+            {"role": "system", "content": "You are helpful.", "name": "system"},
+            {"role": "user", "content": "Hello!", "tool_call_id": "call-1"},
         ],
         "stream": False,
+        "max_tokens": 128,
+        "stop": ["END"],
     }
     req = ChatCompletionRequest(**data)
     assert len(req.messages) == 2
     assert req.messages[1].role == "user"
     assert req.messages[1].content == "Hello!"
     assert req.stream is False
+    assert req.max_tokens == 128
+    assert req.stop == ["END"]
 
 
 def test_build_response():

@@ -12,6 +12,7 @@ from app.llm_provider import (
     create_provider,
 )
 from app.config import get_settings
+from app.runtime.providers import resolve_provider_from_policy
 
 
 class TestFeatherlessProvider:
@@ -442,6 +443,27 @@ class TestProviderFactory:
                 create_provider()
 
             assert "Unsupported LLM provider" in str(exc_info.value)
+
+
+class TestPolicyRouting:
+    """Test provider routing decisions used by the runtime."""
+
+    def test_force_premium_is_deterministic(self):
+        """Force premium always picks the same provider order."""
+        allowed = ["deepseek", "anthropic", "openai"]
+        first = resolve_provider_from_policy(None, "deepseek", allowed, "force_premium")
+        second = resolve_provider_from_policy(None, "deepseek", allowed, "force_premium")
+        assert first == second == "openai"
+
+    def test_block_premium_chooses_non_premium_fallback(self):
+        """Block premium falls back to an allowed non-premium provider."""
+        provider = resolve_provider_from_policy("openai", "openai", ["deepseek", "openai"], "block_premium")
+        assert provider == "deepseek"
+
+    def test_block_premium_rejects_all_premium_configuration(self):
+        """Block premium raises when no non-premium providers are available."""
+        with pytest.raises(ValueError):
+            resolve_provider_from_policy("openai", "openai", ["openai", "anthropic"], "block_premium")
 
 
 class TestProviderIntegration:
