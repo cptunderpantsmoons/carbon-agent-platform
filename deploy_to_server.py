@@ -23,7 +23,6 @@ if not PASSWORD:
     raise RuntimeError(
         "Set DEPLOY_SSH_PASSWORD environment variable before running deploy_to_server.py"
     )
-REPO = "https://github.com/cptunderpantsmoons/carbon-agent-platform.git"
 DIR = "/opt/carbon-agent-platform"
 HUB_DIR = "/opt/carbon-agent-dashboard"
 BASE_DIR = Path(__file__).resolve().parent
@@ -287,7 +286,7 @@ def deploy():
     step(2, STEPS, "Ensuring Docker is installed ...")
     run(
         ssh,
-        "apt-get update -qq && apt-get install -y -qq curl git ca-certificates",
+        "apt-get update -qq && apt-get install -y -qq curl ca-certificates",
         timeout=180,
         show=False,
     )
@@ -299,35 +298,10 @@ def deploy():
     ok("Docker ready")
 
     # ── 3. Repo ──────────────────────────────────────────────────────────────
-    step(3, STEPS, "Cloning / updating repo ...")
-    code, _ = run(ssh, f"test -d {DIR}/.git", show=False, check=False)
-    # Auto-detect available branch (main or feat/corporate-carbon-hub-pass-1)
-    BRANCH = "main"
-    if code == 0:
-        # Check if main exists on remote by listing heads
-        _, branch_list = run(
-            ssh,
-            f"cd {DIR} && git ls-remote --heads origin",
-            show=False,
-            check=False,
-        )
-        if "heads/main" not in branch_list:
-            BRANCH = "feat/corporate-carbon-hub-pass-1"
-        run(
-            ssh,
-            f"cd {DIR} && git fetch origin && git reset --hard origin/{BRANCH}",
-            timeout=60,
-            check=False,
-        )
-    else:
-        # Try main first, fallback to legacy branch for clone
-        clone_code, _ = run(
-            ssh, f"git clone -b {BRANCH} {REPO} {DIR}", timeout=120, check=False
-        )
-        if clone_code != 0:
-            BRANCH = "feat/corporate-carbon-hub-pass-1"
-            run(ssh, f"git clone -b {BRANCH} {REPO} {DIR}", timeout=120)
-    ok(f"Repo up to date (branch: {BRANCH})")
+    step(3, STEPS, "Preparing remote workspace ...")
+    run(ssh, f"mkdir -p {DIR}", timeout=30, show=False)
+    run(ssh, f"mkdir -p {HUB_DIR}", timeout=30, show=False)
+    ok("Remote workspace ready")
 
     step(4, STEPS, "Syncing local fix files to the VPS checkout ...")
     sync_files(ssh, SYNC_FILES)

@@ -138,7 +138,7 @@ services:
       - carbon_network
 
   chromadb:
-    image: ghcr.io/chroma-core/chroma:latest@sha256:c7c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8
+    image: ghcr.io/chroma-core/chroma:latest
     container_name: carbon_chromadb
     ports:
       - "${CHROMADB_PORT:-8002}:8000"
