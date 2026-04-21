@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: postgres:16-alpine@sha256:caf32b35a1e14d1f56b0b87f4d1f7a8f7c1c8a8a0f9e1d3c6b7a8a1f2e4d7c9
+    image: postgres:16-alpine
     container_name: carbon_postgres_prod
     restart: always
     environment:
@@ -32,7 +32,7 @@ services:
         max-file: "3"
 
   redis:
-    image: redis:7-alpine@sha256:2a0268d57afdc0cf2188f1a3e8f8f8a1f8e8f8e8f8e8f8e8f8e8f8e8f8e8f8f
+    image: redis:7-alpine
     container_name: carbon_redis_prod
     restart: always
     command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:?error - set REDIS_PASSWORD}
@@ -351,7 +351,7 @@ services:
         max-file: "3"
 
   contract-hub-postgres:
-    image: postgres:16-alpine@sha256:caf32b35a1e14d1f56b0b87f4d1f7a8f7c1c8a8a0f9e1d3c6b7a8a1f2e4d7c9
+    image: postgres:16-alpine
     container_name: contract_hub_postgres_prod
     restart: always
     environment:

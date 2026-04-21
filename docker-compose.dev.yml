@@ -24,7 +24,7 @@ services:
       - carbon_network
 
   redis:
-    image: redis:7-alpine@sha256:2a0268d57afdc0cf2188f1a3e8f8f8a1f8e8f8e8f8e8f8e8f8e8f8e8f8e8f8f
+    image: redis:7-alpine
     container_name: carbon_redis
     ports:
       - "${REDIS_PORT:-6379}:6379"
