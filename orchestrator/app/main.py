@@ -68,7 +68,7 @@ def _validate_production_config() -> None:
     if missing:
         raise ValueError(
             f"Production startup aborted. Missing required env vars: {', '.join(missing)}. "
-            "Set them in your Railway / .env.production file."
+            "Set them in your Hostinger VPS / .env.production file."
         )
 
 

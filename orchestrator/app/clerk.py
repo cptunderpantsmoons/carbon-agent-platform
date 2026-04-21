@@ -285,7 +285,7 @@ async def _handle_user_created(
         email=email,
     )
 
-    # Fire-and-forget Railway provisioning — must not block the webhook response
+    # Fire-and-forget Docker provisioning — must not block the webhook response
     # (Clerk expects a 2xx within 5 s). provision_user_background creates its own
     # DB session so it is safe after this request's session is committed.
     asyncio.create_task(

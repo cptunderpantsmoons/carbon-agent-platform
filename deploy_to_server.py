@@ -17,7 +17,12 @@ except Exception:
 
 HOST = "187.127.112.59"
 USER = "root"
-PASSWORD = "Letmein7009??"
+# Read password from environment — do not hardcode credentials
+PASSWORD = os.environ.get("DEPLOY_SSH_PASSWORD", "").strip()
+if not PASSWORD:
+    raise RuntimeError(
+        "Set DEPLOY_SSH_PASSWORD environment variable before running deploy_to_server.py"
+    )
 REPO = "https://github.com/cptunderpantsmoons/carbon-agent-platform.git"
 DIR = "/opt/carbon-agent-platform"
 HUB_DIR = "/opt/carbon-agent-dashboard"
@@ -36,8 +41,15 @@ SYNC_FILES = [
     "open-webui/Dockerfile",
     "open-webui/entrypoint.sh",
     "adapter/app/main.py",
+    "docs/runbook.md",
 ]
 
+# Dashboard directories to sync (replaces individual file list)
+DASHBOARD_SYNC_DIRS = [
+    "app",
+    "public",
+    "tests",
+]
 DASHBOARD_SYNC_FILES = [
     "Dockerfile",
     ".dockerignore",
@@ -49,39 +61,7 @@ DASHBOARD_SYNC_FILES = [
     "next-env.d.ts",
     "next.config.ts",
     "middleware.ts",
-    "app/layout.tsx",
-    "app/page.tsx",
-    "app/globals.css",
-    "app/health/route.ts",
-    "app/dashboard/page.tsx",
-    "app/chat/page.tsx",
-    "app/benchmarks/page.tsx",
-    "app/admin/page.tsx",
-    "app/sign-in/page.tsx",
-    "app/sign-up/page.tsx",
-    "app/components/shell/sidebar.tsx",
-    "app/components/shell/top-bar.tsx",
-    "app/components/shell/app-shell.tsx",
-    "app/components/theme-toggle.tsx",
-    "app/lib/admin-agent.js",
-    "app/lib/model-catalog.js",
-    "app/api/admin-agent/route.ts",
-    "app/api/chat/route.ts",
-    "app/api/benchmarks/route.ts",
-    "app/api/documents/route.ts",
-    "app/api/orchestrator/[...path]/route.ts",
-    "app/contracts/page.tsx",
-    "app/documents/page.tsx",
-    "app/skills/page.tsx",
-    "app/lib/theme/provider.tsx",
-    "app/lib/theme/engine.ts",
-    "app/lib/theme/tokens.ts",
-    "app/lib/theme/telemetry.ts",
-    "public/.gitkeep",
-    "tests/admin-agent.test.mjs",
-    "tests/model-catalog.test.mjs",
-    "tests/auth-smoke.test.mjs",
-    "tests/chat-route.test.mjs",
+    ".env.local",
 ]
 
 ORCHESTRATOR_SYNC_FILES = [
@@ -89,7 +69,14 @@ ORCHESTRATOR_SYNC_FILES = [
     "orchestrator/app/schemas.py",
     "orchestrator/app/main.py",
     "orchestrator/app/model_policy.py",
+    "orchestrator/app/admin.py",
+    "orchestrator/app/admin_ui.py",
+    "orchestrator/app/clerk.py",
+    "orchestrator/app/rate_limit.py",
+    "orchestrator/app/session_manager.py",
     "orchestrator/tests/test_model_policy.py",
+    "tests/integration/test_onboarding.py",
+    "tests/integration/test_lifecycle.py",
 ]
 
 # ── Colours (ANSI, safe for Linux terminal via SSH) ──────────────────────────
@@ -172,6 +159,41 @@ def sync_dashboard_files(ssh, files):
         sftp.close()
 
 
+def sync_dashboard_dirs(ssh, dirs):
+    """Upload local dashboard directories using tar over SSH."""
+    import tarfile
+    import io
+    import os as local_os
+
+    for dir_name in dirs:
+        local_dir = DASHBOARD_BASE_DIR / dir_name
+        if not local_dir.exists():
+            raise FileNotFoundError(f"Missing local dashboard directory: {local_dir}")
+
+        # Create tar archive in memory
+        tar_buffer = io.BytesIO()
+        with tarfile.open(fileobj=tar_buffer, mode="w:gz") as tar:
+            tar.add(local_dir, arcname=dir_name)
+        tar_data = tar_buffer.getvalue()
+
+        # Upload tar and extract on remote
+        sftp = ssh.open_sftp()
+        try:
+            remote_tar = f"/tmp/dashboard_{dir_name}.tar.gz"
+            with sftp.file(remote_tar, "wb") as f:
+                f.write(tar_data)
+        finally:
+            sftp.close()
+
+        run(ssh, f"mkdir -p {HUB_DIR}", timeout=30, show=False)
+        run(
+            ssh,
+            f"cd {HUB_DIR} && tar -xzf {remote_tar} && rm -f {remote_tar}",
+            timeout=60,
+            show=False,
+        )
+
+
 def sync_orchestrator_files(ssh, files):
     """Upload local orchestrator files to the remote platform checkout."""
     sftp = ssh.open_sftp()
@@ -248,7 +270,7 @@ def _is_local_or_placeholder_url(url):
 
 
 def deploy():
-    STEPS = 12
+    STEPS = 13
     print(f"\n{'=' * 60}")
     print("  Carbon Agent Platform -- VPS Deployment")
     print(f"  Target : {HOST}")
@@ -279,16 +301,33 @@ def deploy():
     # ── 3. Repo ──────────────────────────────────────────────────────────────
     step(3, STEPS, "Cloning / updating repo ...")
     code, _ = run(ssh, f"test -d {DIR}/.git", show=False, check=False)
-    BRANCH = "feat/corporate-carbon-hub-pass-1"
+    # Auto-detect available branch (main or feat/corporate-carbon-hub-pass-1)
+    BRANCH = "main"
     if code == 0:
+        # Check if main exists on remote by listing heads
+        _, branch_list = run(
+            ssh,
+            f"cd {DIR} && git ls-remote --heads origin",
+            show=False,
+            check=False,
+        )
+        if "heads/main" not in branch_list:
+            BRANCH = "feat/corporate-carbon-hub-pass-1"
         run(
             ssh,
             f"cd {DIR} && git fetch origin && git reset --hard origin/{BRANCH}",
             timeout=60,
+            check=False,
         )
     else:
-        run(ssh, f"git clone -b {BRANCH} {REPO} {DIR}", timeout=120)
-    ok("Repo up to date")
+        # Try main first, fallback to legacy branch for clone
+        clone_code, _ = run(
+            ssh, f"git clone -b {BRANCH} {REPO} {DIR}", timeout=120, check=False
+        )
+        if clone_code != 0:
+            BRANCH = "feat/corporate-carbon-hub-pass-1"
+            run(ssh, f"git clone -b {BRANCH} {REPO} {DIR}", timeout=120)
+    ok(f"Repo up to date (branch: {BRANCH})")
 
     step(4, STEPS, "Syncing local fix files to the VPS checkout ...")
     sync_files(ssh, SYNC_FILES)
@@ -296,6 +335,7 @@ def deploy():
 
     step(5, STEPS, "Syncing Intelligence Hub files to the VPS checkout ...")
     run(ssh, f"mkdir -p {HUB_DIR}", timeout=30, show=False)
+    sync_dashboard_dirs(ssh, DASHBOARD_SYNC_DIRS)
     sync_dashboard_files(ssh, DASHBOARD_SYNC_FILES)
     cleanup_deleted_dashboard_files(ssh)
     ok("Dashboard workspace files uploaded")
@@ -322,13 +362,32 @@ def deploy():
         os.environ.get("ADMIN_AGENT_SSH_TARGET", "").strip()
         or "64Hk1NNpE19r6RaiWdwE7Pk7MgNThWKo@ssh.app.daytona.io"
     )
-    deepseek_api_key = _resolve_value(
-        "DEEPSEEK_API_KEY",
-        os.environ.get("DEEPSEEK_API_KEY"),
-        os.environ.get("LLM_API_KEY"),
-        existing_env.get("DEEPSEEK_API_KEY"),
-        existing_env.get("LLM_API_KEY"),
+    # Resolve LLM provider and API key
+    featherless_api_key = (
+        os.environ.get("FEATHERLESS_API_KEY", "").strip()
+        or existing_env.get("FEATHERLESS_API_KEY", "").strip()
     )
+    deepseek_api_key = (
+        os.environ.get("DEEPSEEK_API_KEY", "").strip()
+        or os.environ.get("LLM_API_KEY", "").strip()
+        or existing_env.get("DEEPSEEK_API_KEY", "").strip()
+        or existing_env.get("LLM_API_KEY", "").strip()
+    )
+
+    if featherless_api_key:
+        llm_provider = "openai"
+        llm_base_url = "https://api.featherless.ai/v1"
+        llm_api_key = featherless_api_key
+        llm_model_name = os.environ.get("LLM_MODEL_NAME", "MiniMaxAI/MiniMax-M2.7")
+    elif deepseek_api_key:
+        llm_provider = "deepseek"
+        llm_base_url = "https://api.deepseek.com/v1"
+        llm_api_key = deepseek_api_key
+        llm_model_name = os.environ.get("LLM_MODEL_NAME", "deepseek-chat")
+    else:
+        raise RuntimeError(
+            "Set FEATHERLESS_API_KEY or DEEPSEEK_API_KEY before deploying"
+        )
 
     local_dashboard_env = DASHBOARD_BASE_DIR / ".env.local"
     local_env = {}
@@ -381,48 +440,99 @@ def deploy():
             "Set a real CLERK_FRONTEND_API_URL before running deploy_to_server.py"
         )
 
+    # Generate or reuse secure secrets
+    postgres_password = existing_env.get("POSTGRES_PASSWORD") or secrets.token_urlsafe(32)
+    redis_password = existing_env.get("REDIS_PASSWORD") or secrets.token_urlsafe(32)
+    admin_api_key = existing_env.get("ADMIN_AGENT_API_KEY") or secrets.token_urlsafe(32)
+    webui_secret = existing_env.get("WEBUI_SECRET") or secrets.token_urlsafe(32)
+    openwebui_api_key = existing_env.get("OPENWEBUI_API_KEY") or secrets.token_urlsafe(32)
+    contract_hub_postgres_password = existing_env.get("CONTRACT_HUB_POSTGRES_PASSWORD") or secrets.token_urlsafe(32)
+
+    # Read Clerk webhook secret — generate dummy for test if missing
+    clerk_webhook_secret = (
+        os.environ.get("CLERK_WEBHOOK_SECRET", "").strip()
+        or existing_env.get("CLERK_WEBHOOK_SECRET", "").strip()
+    )
+    if not clerk_webhook_secret:
+        clerk_webhook_secret = "whsec_" + secrets.token_hex(16)
+        warn(
+            "CLERK_WEBHOOK_SECRET not set — generated dummy value. "
+            "Update this in Clerk Dashboard → Webhooks → Signing secret"
+        )
+
+    # JWT public key is optional (fetched from JWKS endpoint if absent)
+    clerk_jwt_public_key = (
+        os.environ.get("CLERK_JWT_PUBLIC_KEY", "").strip()
+        or existing_env.get("CLERK_JWT_PUBLIC_KEY", "").strip()
+        or ""
+    )
+
+    # Derive JWT issuer from Frontend API URL if not explicitly set
+    clerk_jwt_issuer = (
+        os.environ.get("CLERK_JWT_ISSUER", "").strip()
+        or existing_env.get("CLERK_JWT_ISSUER", "").strip()
+        or clerk_frontend_api_url
+    )
+
+    # RAG tenant ID default
+    rag_fixed_tenant_id = (
+        os.environ.get("RAG_FIXED_TENANT_ID", "").strip()
+        or existing_env.get("RAG_FIXED_TENANT_ID", "").strip()
+        or "contract-hub-tenant"
+    )
+
     desired_env = {
         "POSTGRES_USER": "postgres",
-        "POSTGRES_PASSWORD": "CarbonDB2024!",
+        "POSTGRES_PASSWORD": postgres_password,
         "POSTGRES_DB": "carbon_platform",
-        "DATABASE_URL": "postgresql://postgres:CarbonDB2024!@postgres:5432/carbon_platform",
-        "REDIS_URL": "redis://redis:6379/0",
-        "RATE_LIMIT_STORAGE_URI": "redis://redis:6379/0",
+        "POSTGRES_PORT": "5432",
+        "DATABASE_URL": f"postgresql://postgres:{postgres_password}@postgres:5432/carbon_platform",
+        "REDIS_PASSWORD": redis_password,
+        "REDIS_URL": f"redis://:{redis_password}@redis:6379/0",
+        "RATE_LIMIT_STORAGE_URI": f"redis://:{redis_password}@redis:6379/0",
         "ORCHESTRATOR_PORT": "8000",
         "ADAPTER_PORT": "8001",
         "WEBUI_PORT": "3000",
+        "DASHBOARD_PORT": "3001",
+        "CONTRACT_HUB_PORT": "3002",
+        "CONTRACT_HUB_POSTGRES_PORT": "5433",
         "AGENT_DOCKER_IMAGE": "carbon-agent-adapter:latest",
         "AGENT_MEMORY_LIMIT": "512m",
         "AGENT_CPU_NANOS": "500000000",
-        "DOCKER_NETWORK": "carbon-agent-net",
+        "DOCKER_NETWORK": "carbon_network",
         "AGENT_DOMAIN": HOST,
         "TRAEFIK_ENTRYPOINT": "web",
         "AGENT_BASE_PATH": "/agent",
-        "ADMIN_AGENT_API_KEY": "dev-admin-key-2024",
+        "ADMIN_AGENT_API_KEY": admin_api_key,
         "SESSION_IDLE_TIMEOUT_MINUTES": "15",
         "SESSION_MAX_LIFETIME_HOURS": "24",
         "SESSION_SPINUP_TIMEOUT_SECONDS": "120",
         "CLERK_PUBLISHABLE_KEY": clerk_publishable_key,
         "CLERK_SECRET_KEY": clerk_secret_key,
+        "CLERK_WEBHOOK_SECRET": clerk_webhook_secret,
+        "CLERK_JWT_PUBLIC_KEY": clerk_jwt_public_key,
+        "CLERK_JWT_ISSUER": clerk_jwt_issuer,
         "CLERK_FRONTEND_API_URL": clerk_frontend_api_url,
+        "RAG_FIXED_TENANT_ID": rag_fixed_tenant_id,
         "CORS_ALLOWED_ORIGINS": f"http://{HOST}:3000,http://{HOST}:3001,http://{HOST}:3002,http://{HOST}:8000,http://{HOST}",
-        "AUTO_CREATE_TABLES": "true",
-        "WEBUI_SECRET": "dev-webui-secret-2024",
-        "OPENWEBUI_API_KEY": "sk-dev-test-key",
+        "AUTO_CREATE_TABLES": "false",
+        "WEBUI_SECRET": webui_secret,
+        "OPENWEBUI_API_KEY": openwebui_api_key,
         "OPENWEBUI_CLERK_ENABLED": "true",
         "WEBUI_ADMIN_EMAIL": webui_admin_email,
         "WEBUI_ADMIN_PASSWORD": webui_admin_password,
         "WEBUI_ADMIN_NAME": "Carbon Admin",
-        "DASHBOARD_PORT": "3001",
+        "NEXT_PUBLIC_HUB_ADMIN_EMAIL": webui_admin_email,
+        "WEBUI_CORS_ORIGIN": f"http://{HOST}:3000",
         "AGENT_API_URL": "",
         "AGENT_API_KEY": "",
         "MODEL_NAME": "deepseek-chat",
-        "LLM_PROVIDER": "deepseek",
-        "LLM_BASE_URL": "https://api.deepseek.com/v1",
-        "LLM_API_KEY": deepseek_api_key,
+        "LLM_PROVIDER": llm_provider,
+        "LLM_BASE_URL": llm_base_url,
+        "LLM_API_KEY": llm_api_key,
+        "FEATHERLESS_API_KEY": featherless_api_key,
         "DEEPSEEK_API_KEY": deepseek_api_key,
-        "LLM_MODEL_NAME": "deepseek-chat",
-        "FEATHERLESS_API_KEY": "",
+        "LLM_MODEL_NAME": llm_model_name,
         "OPENAI_API_KEY": "",
         "ANTHROPIC_API_KEY": "",
         "ADMIN_AGENT_ENABLED": "true",
@@ -431,6 +541,11 @@ def deploy():
         "ADMIN_AGENT_TIMEOUT_SECONDS": "90",
         "ADMIN_AGENT_REMOTE_DIR": DIR,
         "ADMIN_AGENT_ALLOWED_SERVICES": "orchestrator,adapter,open-webui,dashboard,vector-store,contract-hub,contract-hub-postgres,postgres,redis,chromadb",
+        "CONTRACT_HUB_PATH": "../contract-hub",
+        "CONTRACT_HUB_POSTGRES_PASSWORD": contract_hub_postgres_password,
+        "CONTRACT_HUB_TENANT_ID": "contract-hub-tenant",
+        "EMBEDDING_MODEL": "all-MiniLM-L6-v2",
+        "VECTOR_COLLECTION_NAME": "carbon_documents",
     }
 
     existing_env.update(desired_env)
@@ -446,76 +561,68 @@ def deploy():
     # ── 5. Docker network ────────────────────────────────────────────────────
     step(7, STEPS, "Docker network ...")
     code, _ = run(
-        ssh, "docker network inspect carbon-agent-net", show=False, check=False
+        ssh, "docker network inspect carbon_network", show=False, check=False
     )
     if code != 0:
-        run(ssh, "docker network create carbon-agent-net")
-    ok("Network carbon-agent-net ready")
+        run(ssh, "docker network create carbon_network")
+    ok("Network carbon_network ready")
 
-    # ── 6. Infrastructure (postgres + redis) ─────────────────────────────────
-    step(8, STEPS, "Starting PostgreSQL + Redis ...")
+    # ── 6. Build + start full production stack ───────────────────────────────
+    step(8, STEPS, "Building images (this takes ~5-10 min) ...")
     run(
         ssh,
-        f"cd {DIR} && docker compose -f docker-compose.infra.yml up -d postgres redis",
-        timeout=120,
-    )
-    print("  Waiting 15s for DB ...")
-    time.sleep(15)
-    code, _ = run(
-        ssh,
-        "docker exec $(docker ps -qf 'name=.*postgres.*' | head -1) pg_isready -U postgres",
-        check=False,
-    )
-    if code == 0:
-        ok("PostgreSQL ready")
-    else:
-        warn("PostgreSQL not yet ready — continuing anyway")
-
-    # ── 7. Build + start app ─────────────────────────────────────────────────
-    step(9, STEPS, "Building images (grab a coffee, this takes ~5 min) ...")
-    run(
-        ssh,
-        f"cd {DIR} && docker compose build orchestrator adapter dashboard open-webui",
+        f"cd {DIR} && docker compose -f docker-compose.prod.yml build",
         timeout=900,
     )
     ok("Images built")
 
-    step(10, STEPS, "Starting services ...")
+    step(9, STEPS, "Starting production services ...")
     run(
         ssh,
-        f"cd {DIR} && docker compose up -d orchestrator adapter dashboard",
-        timeout=120,
+        f"cd {DIR} && docker compose -f docker-compose.prod.yml up -d",
+        timeout=180,
     )
-    print("  Waiting 30s for orchestrator + adapter + dashboard ...")
-    time.sleep(30)
-    run(ssh, f"cd {DIR} && docker compose up -d open-webui", timeout=60)
+    print("  Waiting 45s for services to initialize ...")
+    time.sleep(45)
     ok("Services started")
+
+    # ── 7. Health check infrastructure ───────────────────────────────────────
+    step(10, STEPS, "Checking database readiness ...")
+    code, _ = run(
+        ssh,
+        "docker exec carbon_postgres_prod pg_isready -U postgres",
+        check=False,
+        show=False,
+    )
+    if code == 0:
+        ok("PostgreSQL ready")
+    else:
+        warn("PostgreSQL may still be starting — continuing")
+
+    code, _ = run(
+        ssh,
+        "docker exec carbon_redis_prod redis-cli ping",
+        check=False,
+        show=False,
+    )
+    if code == 0:
+        ok("Redis ready")
+    else:
+        warn("Redis may still be starting — continuing")
 
     # ── 8. Migrations ────────────────────────────────────────────────────────
     step(11, STEPS, "Running Alembic migrations ...")
-    # Get the actual container name
-    code, orch_id = run(
+    code, _ = run(
         ssh,
-        "docker ps --filter 'name=orchestrator' --format '{{.Names}}' | head -1",
-        show=False,
+        "docker exec carbon_orchestrator_prod alembic upgrade head",
+        timeout=60,
         check=False,
+        show=False,
     )
-    orch_id = orch_id.strip()
-    if orch_id:
-        code, _ = run(
-            ssh,
-            f"docker exec {orch_id} python -m alembic upgrade head",
-            timeout=60,
-            check=False,
-        )
-        if code == 0:
-            ok("Migrations applied")
-        else:
-            warn("Migrations may have already run (AUTO_CREATE_TABLES=true) -- OK")
+    if code == 0:
+        ok("Migrations applied")
     else:
-        warn(
-            "Orchestrator container not found for migration -- AUTO_CREATE_TABLES=true will handle it"
-        )
+        warn("Migrations may have already run -- OK")
 
     # ── 9. Health checks ─────────────────────────────────────────────────────
     step(12, STEPS, "Health checks ...")
@@ -525,37 +632,41 @@ def deploy():
 
     # Orchestrator
     code, _ = run(ssh, "curl -sf http://localhost:8000/health", check=False, show=False)
-    results["Orchestrator :8000"] = code == 0
+    results["Orchestrator  :8000"] = code == 0
 
     # Adapter
     code, _ = run(ssh, "curl -sf http://localhost:8001/health", check=False, show=False)
-    results["Adapter     :8001"] = code == 0
+    results["Adapter       :8001"] = code == 0
 
     # Open WebUI
     code, _ = run(ssh, "curl -sf http://localhost:3000/health", check=False, show=False)
-    results["Open WebUI  :3000"] = code == 0
+    results["Open WebUI    :3000"] = code == 0
 
     # Dashboard
-    code, _ = run(ssh, "curl -sf http://localhost:3001/health", check=False, show=False)
-    results["Dashboard   :3001"] = code == 0
+    code, _ = run(ssh, "curl -sf http://localhost:3001/api/health", check=False, show=False)
+    results["Dashboard     :3001"] = code == 0
+
+    # Contract Hub
+    code, _ = run(ssh, "curl -sf http://localhost:3002/api/health", check=False, show=False)
+    results["Contract Hub  :3002"] = code == 0
 
     # PostgreSQL
     code, _ = run(
         ssh,
-        "docker exec $(docker ps -qf 'name=.*postgres.*' | head -1) pg_isready -U postgres",
+        "docker exec carbon_postgres_prod pg_isready -U postgres",
         check=False,
         show=False,
     )
-    results["PostgreSQL       "] = code == 0
+    results["PostgreSQL         "] = code == 0
 
     # Redis
     code, _ = run(
         ssh,
-        "docker exec $(docker ps -qf 'name=.*redis.*' | head -1) redis-cli ping",
+        "docker exec carbon_redis_prod redis-cli ping",
         check=False,
         show=False,
     )
-    results["Redis            "] = code == 0
+    results["Redis              "] = code == 0
 
     for name, passed in results.items():
         icon = f"{G}[OK]{E}" if passed else f"{R}[FAIL]{E}"
@@ -584,7 +695,8 @@ def deploy():
     print(f"\n  Orchestrator : http://{HOST}:8000")
     print(f"  Adapter      : http://{HOST}:8001")
     print(f"  Open WebUI   : http://{HOST}:3000")
-    print(f"  Admin UI     : http://{HOST}:8000/dashboard")
+    print(f"  Dashboard    : http://{HOST}:3001")
+    print(f"  Contract Hub : http://{HOST}:3002")
     print(f"  API Docs     : http://{HOST}:8000/docs")
     print(f"{'=' * 60}\n")
 

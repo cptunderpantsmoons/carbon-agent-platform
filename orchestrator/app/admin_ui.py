@@ -631,7 +631,7 @@ async function deleteUser(id, email) {
 }
 
 async function spinDownUser(id) {
-  if (!confirm('Spin down this service? The Railway service will be stopped.')) return;
+  if (!confirm('Spin down this service? The Docker container will be stopped.')) return;
   try {
     await api(`/admin/users/${id}/spin-down`, { method: 'POST' });
     await loadSessions(); await loadMetrics(); await loadUsers();

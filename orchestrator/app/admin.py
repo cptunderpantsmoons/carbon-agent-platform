@@ -214,7 +214,7 @@ async def delete_user(
     db: AsyncSession = Depends(get_session),
     _: User = Depends(verify_admin_jwt),
 ):
-    """Delete a user and spin down their Railway service."""
+    """Delete a user and spin down their Docker container."""
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
     if not user:

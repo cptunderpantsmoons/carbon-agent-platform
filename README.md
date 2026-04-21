@@ -29,7 +29,107 @@ Clerk (authentication) + Docker Engine (container management)
 - **Clerk**: User authentication and webhook provisioning
 - **Agent Zero**: The actual AI agent backend
 
-## Self-Hosted Deployment
+## Hostinger Ubuntu VPS Deployment
+
+**Live Instance**: `http://187.127.112.59:3001/`
+
+### Prerequisites
+
+1. **Hostinger VPS**: Ubuntu 22.04+ with at least 4 vCPU / 8 GB RAM
+2. **Docker 24+** and Docker Compose v2
+3. **Ports open**: 22 (SSH), 3001 (Dashboard), 8000 (Orchestrator API) — internal ports bound to localhost only
+4. **Clerk Account**: Production instance with Svix webhooks configured
+
+### Server Setup
+
+```bash
+# SSH into your Hostinger VPS
+ssh root@187.127.112.59
+
+# Update system
+apt update && apt upgrade -y
+
+# Install Docker
+curl -fsSL https://get.docker.com | sh
+systemctl enable --now docker
+usermod -aG docker $USER
+
+# Install Docker Compose plugin
+apt install -y docker-compose-v2
+
+# Verify
+docker --version
+docker compose version
+```
+
+### Deployment Steps
+
+```bash
+# 1. Clone repository
+git clone <repo> /opt/carbon-agent-platform
+cd /opt/carbon-agent-platform
+
+# 2. Configure environment
+cp .env.example .env
+nano .env
+
+# Required production variables:
+#   CLERK_SECRET_KEY=sk_live_...
+#   CLERK_PUBLISHABLE_KEY=pk_live_...
+#   CLERK_WEBHOOK_SECRET=whsec_...
+#   CLERK_JWT_PUBLIC_KEY=-----BEGIN PUBLIC KEY-----
+#   POSTGRES_PASSWORD=<strong-password>
+#   REDIS_PASSWORD=<strong-password>
+#   ADMIN_AGENT_API_KEY=<strong-admin-key>
+#   CORS_ALLOWED_ORIGINS=http://187.127.112.59:3001
+
+# 3. Create Docker network
+docker network create carbon_network
+
+# 4. Deploy full production stack
+docker compose -f docker-compose.prod.yml up -d --build
+
+# 5. Verify all services are healthy
+sleep 30
+docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+
+# 6. Test health endpoints
+curl http://localhost:8000/health
+curl http://localhost:3001/api/health
+```
+
+### Post-Deployment Configuration
+
+1. **Configure Clerk Webhook Endpoint**:
+   - URL: `http://187.127.112.59:3000/webhooks/clerk`
+   - Events: `user.created`, `user.updated`, `user.deleted`
+
+2. **Create Admin User** (optional):
+   ```bash
+   curl -X POST http://localhost:8000/admin/users \
+     -H "X-Admin-Key: ${ADMIN_AGENT_API_KEY}" \
+     -H "Content-Type: application/json" \
+     -d '{"email": "admin@yourdomain.com", "display_name": "Admin"}'
+   ```
+
+3. **Verify End-to-End**:
+   - Visit `http://187.127.112.59:3001/`
+   - Sign up via Clerk
+   - Check that a Docker container is created: `docker ps | grep agent-`
+
+### Update & Redeploy
+
+```bash
+cd /opt/carbon-agent-platform
+git pull origin main
+docker compose -f docker-compose.prod.yml up -d --build
+docker image prune -f
+docker compose -f docker-compose.prod.yml ps
+```
+
+---
+
+## Self-Hosted Deployment (Generic)
 
 ### Prerequisites
 

@@ -8,7 +8,7 @@ Storage backend is configured via ``RATE_LIMIT_STORAGE_URI`` in settings:
   redis://host/db  Redis-backed storage — survives restarts and is shared
                    across all replicas.  Use this in production.
 
-Example Railway production env::
+Example production env::
 
     RATE_LIMIT_STORAGE_URI=redis://redis:6379/0
 """
