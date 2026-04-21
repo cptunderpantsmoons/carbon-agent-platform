@@ -617,7 +617,7 @@ def deploy():
     results["Open WebUI    :3000"] = code == 0
 
     # Dashboard
-    code, _ = run(ssh, "curl -sf http://localhost:3001/api/health", check=False, show=False)
+    code, _ = run(ssh, "curl -sf http://localhost:3001/health", check=False, show=False)
     results["Dashboard     :3001"] = code == 0
 
     # Contract Hub
