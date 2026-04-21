@@ -135,7 +135,7 @@ class VectorStore:
         where_filter: Optional[Dict] = None,
     ) -> Dict:
         """Search the vector store for relevant documents."""
-        query_embedding = self.embedding_model.encode([query]).tolist()
+        query_embedding = [emb.tolist() for emb in self.embedding_model.embed([query])][0]
         chroma_where_filter = self._normalize_where_filter(where_filter)
 
         search_params = {
