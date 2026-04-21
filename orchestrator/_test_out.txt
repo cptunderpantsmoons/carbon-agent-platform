@@ -1,1 +1,0 @@
-C:\Users\MoonBuggy\AppData\Local\uv\cache\archive-v0\NW26YKMAqW-RJ5q3R-Xdo\Scripts\python.exe: No module named pytest

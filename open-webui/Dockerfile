@@ -47,7 +47,7 @@ RUN chmod +x /app/entrypoint.sh \
                  /app/static/custom-theme.css \
                  /app/backend/data/config.json.template
 
-# ── Inject clerk-integration.js at build time ──────────────────────────────────
+# ── Inject clerk-integration.js at build time ──────────────────────────────
 # Done here (as root) so the entrypoint does not need write access to /app/build.
 # The entrypoint checks for the script tag and skips re-injection if already present.
 RUN if [ -f /app/build/index.html ]; then \
@@ -59,7 +59,7 @@ RUN if [ -f /app/build/index.html ]; then \
         echo "[build] WARNING: /app/build/index.html not found -- injection deferred to entrypoint"; \
     fi
 
-# ── Set ownership ──────────────────────────────────────────────────────────────
+# ── Set ownership ───────────────────────────────────────────────────────────
 # Make all of /app readable/executable by everyone so the webui user can run
 # the Open WebUI Python backend.  Grant webui write access only to the dirs it
 # must modify at runtime (config substitution, static uploads).

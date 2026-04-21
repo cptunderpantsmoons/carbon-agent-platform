@@ -8,7 +8,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?error - set POSTGRES_PASSWORD}
     ports:
-      - "127.0.0.1:5432:5432"
+      - "0.0.0.0:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -37,7 +37,7 @@ services:
     restart: always
     command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:?error - set REDIS_PASSWORD}
     ports:
-      - "127.0.0.1:6379:6379"
+      - "0.0.0.0:6379:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -67,7 +67,7 @@ services:
     container_name: carbon_orchestrator_prod
     restart: always
     ports:
-      - "127.0.0.1:8000:8000"
+      - "0.0.0.0:8000:8000"
     environment:
       # Database
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-carbon_platform}
@@ -131,7 +131,7 @@ services:
     container_name: carbon_adapter_prod
     restart: always
     ports:
-      - "127.0.0.1:8001:8000"
+      - "0.0.0.0:8001:8000"
     environment:
       # Database
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-carbon_platform}
@@ -179,7 +179,7 @@ services:
     container_name: carbon_chromadb_prod
     restart: always
     ports:
-      - "127.0.0.1:8002:8000"
+      - "0.0.0.0:8002:8000"
     environment:
       IS_PERSISTENT: "TRUE"
       PERSIST_DIRECTORY: /chroma/chroma_db
@@ -217,7 +217,7 @@ services:
     container_name: carbon_vector_store_prod
     restart: always
     ports:
-      - "127.0.0.1:8003:8000"
+      - "0.0.0.0:8003:8000"
     environment:
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-all-MiniLM-L6-v2}
       CHROMA_HOST: chromadb
@@ -255,7 +255,7 @@ services:
     container_name: carbon_webui_prod
     restart: always
     ports:
-      - "127.0.0.1:3000:8080"
+      - "0.0.0.0:3000:8080"
     environment:
       # OpenAI/Adapter Configuration
       OPENAI_API_BASE_URL: http://adapter:8000/v1
@@ -316,7 +316,7 @@ services:
     container_name: carbon_dashboard_prod
     restart: always
     ports:
-      - "127.0.0.1:3001:3000"
+      - "0.0.0.0:3001:3000"
     environment:
       NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${CLERK_PUBLISHABLE_KEY:?error - set CLERK_PUBLISHABLE_KEY}
       CLERK_SECRET_KEY: ${CLERK_SECRET_KEY:?error - set CLERK_SECRET_KEY}
@@ -363,7 +363,7 @@ services:
       POSTGRES_USER: contracthub
       POSTGRES_PASSWORD: ${CONTRACT_HUB_POSTGRES_PASSWORD:?error - set CONTRACT_HUB_POSTGRES_PASSWORD}
     ports:
-      - "127.0.0.1:${CONTRACT_HUB_POSTGRES_PORT:-5433}:5432"
+      - "0.0.0.0:${CONTRACT_HUB_POSTGRES_PORT:-5433}:5432"
     volumes:
       - contract_hub_pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -393,7 +393,7 @@ services:
     container_name: contract_hub_prod
     restart: always
     ports:
-      - "127.0.0.1:${CONTRACT_HUB_PORT:-3002}:3000"
+      - "0.0.0.0:${CONTRACT_HUB_PORT:-3002}:3000"
     environment:
       NODE_ENV: production
       PORT: 3000

@@ -26,6 +26,10 @@ wheels/
 htmlcov/
 *.db
 *.sqlite
+test_results*.txt
+test_full_results.txt
+test_stream.txt
+test_simple.txt
 
 # Virtual Environment
 venv/
